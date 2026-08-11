@@ -4,6 +4,7 @@
 /local-roms
 /node_modules
 /tmp
+package-lock.json
 
 # wrangler files
 .wrangler
