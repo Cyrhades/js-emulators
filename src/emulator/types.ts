@@ -68,6 +68,14 @@ export interface GameGenieSupport {
   setGameId?(gameId: string): void;
 }
 
+export interface SaveDataSupport {
+  hasSaveData(): boolean;
+  getSaveData(): Uint8Array | null;
+  loadSaveData(data: Uint8Array): void;
+  exportSaveFile?(): Uint8Array | null;
+  importSaveFile?(data: Uint8Array): void;
+}
+
 export interface Emulator {
   readonly id: string;
   readonly name: string;
@@ -86,6 +94,7 @@ export interface Emulator {
   handleInput(input: EmulatorInput): void;
 
   gameGenie?: GameGenieSupport;
+  saveData?: SaveDataSupport;
 }
 
 export enum EmulatorStatus {

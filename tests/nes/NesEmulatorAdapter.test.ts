@@ -151,4 +151,9 @@ describe("NesEmulatorAdapter", () => {
     adapter.gameGenie.clearGameGenieCodes();
     expect(adapter.gameGenie.getGameGenieCodes()).toHaveLength(0);
   });
+
+  it("should expose saveData interface", () => {
+    expect(adapter.saveData).toBeDefined();
+    expect(adapter.saveData.hasSaveData()).toBe(false);
+  });
 });

@@ -4,6 +4,7 @@ import {
   AudioOutput,
   EmulatorInput,
   GameGenieSupport,
+  SaveDataSupport,
   CheatCode,
   GameGeniePatch,
 } from "../../../src/emulator/types";
@@ -27,6 +28,8 @@ const BUTTON_MAP: Record<string, number> = {
   turboB: Controller.BUTTON_TURBO_B,
 };
 
+const sharedMemoryStorage = new Map<string, string>();
+
 export class NesEmulatorAdapter implements Emulator {
   public readonly id = "nes";
   public readonly name = "Nintendo (NES)";
@@ -42,9 +45,13 @@ export class NesEmulatorAdapter implements Emulator {
   private prevButtons: Record<string, boolean> = {};
 
   public gameGenie: GameGenieSupport;
+  public saveData: SaveDataSupport;
   private cheatCodes: CheatCode[] = [];
   private gameGenieEnabledState: boolean = true;
   private currentGameId: string | null = null;
+
+  private saveRamTimer: any = null;
+  private isSaveRamDirty: boolean = false;
 
   constructor() {
     this.videoBuffer = new Uint8ClampedArray(SCREEN_WIDTH * SCREEN_HEIGHT * 4);
@@ -58,6 +65,9 @@ export class NesEmulatorAdapter implements Emulator {
       },
       onAudioSample: (left: number, right: number) => {
         this.audioSamples.push((left + right) / 2);
+      },
+      onBatteryRamWrite: () => {
+        this.handleBatteryRamWrite();
       },
       removeSpriteLimit: true,
       sampleRate: 44100,
@@ -74,6 +84,32 @@ export class NesEmulatorAdapter implements Emulator {
       setGameId: (gameId: string) => this.setGameId(gameId),
     };
 
+    this.saveData = {
+      hasSaveData: () => {
+        return !!(this.nes && this.nes.rom && (this.nes.rom.batteryRam || this.nes.rom.batteryRamData));
+      },
+      getSaveData: () => {
+        return this.nes ? this.nes.getSaveData() : null;
+      },
+      loadSaveData: (data: Uint8Array) => {
+        if (this.nes) {
+          this.nes.loadSaveData(data);
+          this.isSaveRamDirty = true;
+          this.flushSaveRamToStorage();
+        }
+      },
+      exportSaveFile: () => {
+        return this.nes ? this.nes.getSaveData() : null;
+      },
+      importSaveFile: (data: Uint8Array) => {
+        if (this.nes) {
+          this.nes.loadSaveData(data);
+          this.isSaveRamDirty = true;
+          this.flushSaveRamToStorage();
+        }
+      },
+    };
+
     this.loop = this.loop.bind(this);
   }
 
@@ -81,6 +117,7 @@ export class NesEmulatorAdapter implements Emulator {
   private readonly frameInterval: number = 1000 / 60.0;
 
   public async loadRom(data: Uint8Array): Promise<void> {
+    this.flushSaveRamToStorage();
     this.stop();
     await audioManager.resume();
     const sr = audioManager.getSampleRate();
@@ -91,13 +128,16 @@ export class NesEmulatorAdapter implements Emulator {
     this.lastFrameTime = 0;
     this.loadCodesFromStorage();
     this.reapplyPatches();
+    this.loadRamFromStorage();
     audioManager.clear();
   }
 
   public setGameId(gameId: string): void {
+    this.flushSaveRamToStorage();
     this.currentGameId = gameId;
     this.loadCodesFromStorage();
     this.reapplyPatches();
+    this.loadRamFromStorage();
   }
 
   public isGameGenieEnabled(): boolean {
@@ -197,11 +237,37 @@ export class NesEmulatorAdapter implements Emulator {
     }
   }
 
+  private getStorage(): { getItem: (k: string) => string | null; setItem: (k: string, v: string) => void } {
+    try {
+      if (typeof window !== "undefined" && window.localStorage) {
+        window.localStorage.setItem("__test__", "1");
+        window.localStorage.removeItem("__test__");
+        return window.localStorage;
+      }
+    } catch {
+      // fallback
+    }
+    try {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("__test__", "1");
+        localStorage.removeItem("__test__");
+        return localStorage;
+      }
+    } catch {
+      // fallback
+    }
+    return {
+      getItem: (k: string) => sharedMemoryStorage.get(k) ?? null,
+      setItem: (k: string, v: string) => sharedMemoryStorage.set(k, v),
+    };
+  }
+
   private loadCodesFromStorage(): void {
     if (!this.currentGameId) return;
     try {
+      const storage = this.getStorage();
       const key = `gamegenie_codes_${this.id}_${this.currentGameId}`;
-      const stored = typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
+      const stored = storage ? storage.getItem(key) : null;
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed.codes)) {
@@ -220,9 +286,10 @@ export class NesEmulatorAdapter implements Emulator {
   private saveCodesToStorage(): void {
     if (!this.currentGameId) return;
     try {
+      const storage = this.getStorage();
       const key = `gamegenie_codes_${this.id}_${this.currentGameId}`;
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(
+      if (storage) {
+        storage.setItem(
           key,
           JSON.stringify({
             codes: this.cheatCodes,
@@ -232,6 +299,79 @@ export class NesEmulatorAdapter implements Emulator {
       }
     } catch (e) {
       console.warn("Could not save Game Genie codes to storage", e);
+    }
+  }
+
+  private getSaveRamKey(): string | null {
+    if (this.currentGameId) {
+      return `nes_sram_${this.currentGameId}`;
+    }
+    return null;
+  }
+
+  private handleBatteryRamWrite(): void {
+    this.isSaveRamDirty = true;
+    if (!this.saveRamTimer) {
+      this.saveRamTimer = setTimeout(() => {
+        this.saveRamTimer = null;
+        this.flushSaveRamToStorage();
+      }, 1000);
+    }
+  }
+
+  public flushSaveRamToStorage(): void {
+    if (this.saveRamTimer) {
+      clearTimeout(this.saveRamTimer);
+      this.saveRamTimer = null;
+    }
+    if (this.isSaveRamDirty) {
+      this.saveRamToStorage();
+      this.isSaveRamDirty = false;
+    }
+  }
+
+  public saveRamToStorage(): void {
+    const key = this.getSaveRamKey();
+    if (!key) return;
+    const saveData = this.nes.getSaveData();
+    if (!saveData) return;
+
+    try {
+      const storage = this.getStorage();
+      if (storage) {
+        const base64 = typeof Buffer !== "undefined"
+          ? Buffer.from(saveData).toString("base64")
+          : btoa(Array.from(saveData).map((b: number) => String.fromCharCode(b)).join(""));
+        storage.setItem(key, base64);
+      }
+    } catch (e) {
+      console.warn("Could not save battery RAM to storage", e);
+    }
+  }
+
+  public loadRamFromStorage(): void {
+    const key = this.getSaveRamKey();
+    if (!key) return;
+    try {
+      const storage = this.getStorage();
+      if (storage) {
+        const stored = storage.getItem(key);
+        if (stored) {
+          let data: Uint8Array;
+          if (typeof Buffer !== "undefined") {
+            data = new Uint8Array(Buffer.from(stored, "base64"));
+          } else {
+            const binary = atob(stored);
+            data = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+              data[i] = binary.charCodeAt(i);
+            }
+          }
+          this.nes.loadSaveData(data);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not load battery RAM from storage", e);
     }
   }
 
@@ -249,6 +389,7 @@ export class NesEmulatorAdapter implements Emulator {
   }
 
   public pause(): void {
+    this.flushSaveRamToStorage();
     this.isPaused = true;
     if (this.animFrameId !== null) {
       cancelAnimationFrame(this.animFrameId);
@@ -270,14 +411,17 @@ export class NesEmulatorAdapter implements Emulator {
   }
 
   public reset(): void {
+    this.flushSaveRamToStorage();
     this.nes.reloadROM();
     this.audioSamples = [];
     this.lastFrameTime = 0;
     this.reapplyPatches();
+    this.loadRamFromStorage();
     audioManager.clear();
   }
 
   public stop(): void {
+    this.flushSaveRamToStorage();
     this.isRunning = false;
     this.isPaused = false;
     this.lastFrameTime = 0;

@@ -45,7 +45,12 @@ class Mapper0 {
     } else if (address >= 0x6000) {
       // Cartridge SRAM (0x6000-0x7FFF)
       this.nes.cpu.mem[address] = value;
-      this.nes.opts.onBatteryRamWrite(address, value);
+      if (this.nes.rom.batteryRamData) {
+        this.nes.rom.batteryRamData[address - 0x6000] = value;
+      }
+      if (this.nes.opts.onBatteryRamWrite) {
+        this.nes.opts.onBatteryRamWrite(address, value);
+      }
     } else if (address > 0x4017) {
       // Cartridge expansion area (0x4018-0x5FFF)
       this.nes.cpu.mem[address] = value;
@@ -435,11 +440,16 @@ class Mapper0 {
 
   loadBatteryRam() {
     if (this.nes.rom.batteryRam) {
-      let ram = this.nes.rom.batteryRam;
-      if (ram !== null && ram.length === 0x2000) {
-        // Load Battery RAM into memory:
-        copyArrayElements(ram, 0, this.nes.cpu.mem, 0x6000, 0x2000);
+      if (!this.nes.rom.batteryRamData) {
+        this.nes.rom.batteryRamData = new Uint8Array(0x2000);
       }
+      copyArrayElements(
+        this.nes.rom.batteryRamData,
+        0,
+        this.nes.cpu.mem,
+        0x6000,
+        0x2000,
+      );
     }
   }
 

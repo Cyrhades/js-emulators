@@ -20,9 +20,24 @@ export interface NESOptions {
   sampleRate?: number;
 }
 
+export interface ROMInfo {
+  batteryRam: boolean;
+  batteryRamData: Uint8Array | null;
+  getSaveData: () => Uint8Array | null;
+  setSaveData: (data: Uint8Array | ArrayBuffer | number[]) => void;
+}
+
+export interface MapperInfo {
+  write: (address: number, value: number) => void;
+  load: (address: number) => number;
+  loadBatteryRam: () => void;
+}
+
 export class NES {
   constructor(opts: NESOptions);
   gameGenie: GameGenie;
+  rom: ROMInfo;
+  mmap: MapperInfo;
   reset: () => void;
   frame: () => void;
   buttonDown: (controller: ControllerId, button: ButtonKey) => void;
@@ -33,6 +48,8 @@ export class NES {
   getFPS: () => number;
   reloadROM: () => void;
   loadROM: (data: string | Buffer | Uint8Array | ArrayBuffer) => void;
+  getSaveData: () => Uint8Array | null;
+  loadSaveData: (data: Uint8Array) => void;
   setFramerate: (rate: number) => void;
   setSampleRate: (rate: number) => void;
   toJSON: () => EmulatorData;

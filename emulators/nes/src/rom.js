@@ -1,5 +1,6 @@
 import Mappers from "./mappers/index.js";
 import Tile from "./tile.js";
+import { copyArrayElements } from "./utils.js";
 
 class ROM {
   // Mirroring types (instance properties so they're accessible via
@@ -16,6 +17,7 @@ class ROM {
   constructor(nes) {
     this.nes = nes;
     this.valid = false;
+    this.batteryRamData = null;
   }
 
   load(data) {
@@ -53,6 +55,10 @@ class ROM {
     this.batteryRam = (this.header[6] & 2) !== 0;
     this.trainer = (this.header[6] & 4) !== 0;
     this.fourScreen = (this.header[6] & 8) !== 0;
+
+    if (this.batteryRam && !this.batteryRamData) {
+      this.batteryRamData = new Uint8Array(0x2000);
+    }
 
     // Detect NES 2.0: byte 7 bits 3..2 == 0b10
     // https://www.nesdev.org/wiki/NES_2.0
@@ -257,6 +263,30 @@ class ROM {
       return new Mappers[this.mapperType](this.nes);
     } else {
       throw new Error(`Unsupported mapper: ${this.mapperType}`);
+    }
+  }
+
+  getSaveData() {
+    if (this.nes && this.nes.cpu && this.nes.cpu.mem) {
+      const ram = this.nes.cpu.mem.slice(0x6000, 0x8000);
+      this.batteryRamData = ram;
+      return new Uint8Array(ram);
+    }
+    if (this.batteryRamData) {
+      return new Uint8Array(this.batteryRamData);
+    }
+    return null;
+  }
+
+  setSaveData(data) {
+    if (!data) return;
+    const ram = new Uint8Array(0x2000);
+    const source = data instanceof Uint8Array ? data : new Uint8Array(data);
+    ram.set(source.subarray(0, Math.min(source.length, 0x2000)));
+    this.batteryRamData = ram;
+    this.batteryRam = true;
+    if (this.nes && this.nes.cpu && this.nes.cpu.mem) {
+      copyArrayElements(ram, 0, this.nes.cpu.mem, 0x6000, 0x2000);
     }
   }
 }

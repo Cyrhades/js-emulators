@@ -195,6 +195,19 @@ class NES {
     this.papu.setFrameRate(rate);
   }
 
+  getSaveData() {
+    return this.rom ? this.rom.getSaveData() : null;
+  }
+
+  loadSaveData(data) {
+    if (this.rom) {
+      this.rom.setSaveData(data);
+      if (this.mmap) {
+        this.mmap.loadBatteryRam();
+      }
+    }
+  }
+
   toJSON() {
     return {
       // romData: this.romData,
