@@ -1,0 +1,157 @@
+{
+  "version": "1.0",
+  "updatedAt": "2026-08-09T19:05:00.000Z",
+  "consoles": {
+    "atari2600": {
+      "playerCount": 2,
+      "maxPlayers": 2,
+      "players": {
+        "1": {
+          "up": "ArrowUp",
+          "down": "ArrowDown",
+          "left": "ArrowLeft",
+          "right": "ArrowRight",
+          "fire": "Space",
+          "reset": "KeyR",
+          "select": "KeyS"
+        },
+        "2": {
+          "up": "KeyI",
+          "down": "KeyK",
+          "left": "KeyJ",
+          "right": "KeyL",
+          "fire": "KeyF",
+          "reset": "KeyR",
+          "select": "KeyS"
+        }
+      }
+    },
+    "nes": {
+      "playerCount": 2,
+      "maxPlayers": 4,
+      "players": {
+        "1": {
+          "up": "ArrowUp",
+          "down": "ArrowDown",
+          "left": "ArrowLeft",
+          "right": "ArrowRight",
+          "a": "KeyX",
+          "b": "KeyZ",
+          "select": "ShiftLeft",
+          "start": "Enter"
+        },
+        "2": {
+          "up": "KeyI",
+          "down": "KeyK",
+          "left": "KeyJ",
+          "right": "KeyL",
+          "a": "KeyN",
+          "b": "KeyM",
+          "select": "KeyV",
+          "start": "KeyB"
+        },
+        "3": {
+          "up": "Numpad8",
+          "down": "Numpad2",
+          "left": "Numpad4",
+          "right": "Numpad6",
+          "a": "Numpad0",
+          "b": "NumpadDecimal",
+          "select": "NumpadAdd",
+          "start": "NumpadEnter"
+        },
+        "4": {
+          "up": "KeyW",
+          "down": "KeyS",
+          "left": "KeyA",
+          "right": "KeyD",
+          "a": "KeyG",
+          "b": "KeyH",
+          "select": "KeyT",
+          "start": "KeyY"
+        }
+      }
+    },
+    "snes": {
+      "playerCount": 2,
+      "maxPlayers": 4,
+      "players": {
+        "1": {
+          "up": "ArrowUp",
+          "down": "ArrowDown",
+          "left": "ArrowLeft",
+          "right": "ArrowRight",
+          "a": "KeyX",
+          "b": "KeyZ",
+          "x": "KeyS",
+          "y": "KeyA",
+          "l": "KeyQ",
+          "r": "KeyE",
+          "select": "ShiftLeft",
+          "start": "Enter"
+        }
+      }
+    },
+    "gb": {
+      "playerCount": 1,
+      "maxPlayers": 1,
+      "players": {
+        "1": {
+          "up": "ArrowUp",
+          "down": "ArrowDown",
+          "left": "ArrowLeft",
+          "right": "ArrowRight",
+          "a": "KeyX",
+          "b": "KeyZ",
+          "select": "ShiftLeft",
+          "start": "Enter"
+        }
+      }
+    },
+    "md": {
+      "playerCount": 2,
+      "maxPlayers": 4,
+      "players": {
+        "1": {
+          "up": "ArrowUp",
+          "down": "ArrowDown",
+          "left": "ArrowLeft",
+          "right": "ArrowRight",
+          "a": "KeyA",
+          "b": "KeyS",
+          "c": "KeyD",
+          "start": "Enter"
+        }
+      }
+    },
+    "sms": {
+      "playerCount": 2,
+      "maxPlayers": 2,
+      "players": {
+        "1": {
+          "up": "ArrowUp",
+          "down": "ArrowDown",
+          "left": "ArrowLeft",
+          "right": "ArrowRight",
+          "button1": "KeyZ",
+          "button2": "KeyX"
+        }
+      }
+    },
+    "gg": {
+      "playerCount": 1,
+      "maxPlayers": 1,
+      "players": {
+        "1": {
+          "up": "ArrowUp",
+          "down": "ArrowDown",
+          "left": "ArrowLeft",
+          "right": "ArrowRight",
+          "button1": "KeyZ",
+          "button2": "KeyX",
+          "start": "Enter"
+        }
+      }
+    }
+  }
+}
