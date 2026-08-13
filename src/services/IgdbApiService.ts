@@ -1,6 +1,7 @@
 import { igdbConfigService } from "./IgdbConfigService";
 import { gameDatabaseService, IgdbGameMetadata } from "./GameDatabaseService";
 import { extractCleanRomTitle } from "../emulator/RomTitleExtractor";
+import { Crc32Service } from "./Crc32Service";
 
 // Platform IDs for IGDB filtering (including regional variants like NES + Famicom)
 const IGDB_PLATFORM_IDS: Record<string, string> = {
@@ -48,7 +49,8 @@ export class IgdbApiService {
   public async getOrFetchMetadata(
     gameName: string,
     consoleId: string,
-    romFilename: string
+    romFilename: string,
+    romData?: Uint8Array
   ): Promise<IgdbGameMetadata | null> {
     const key = `${consoleId}:${romFilename || gameName}`;
 
@@ -70,7 +72,7 @@ export class IgdbApiService {
 
     const fetchPromise = (async () => {
       try {
-        const metadata = await this.searchAndFetchGame(gameName, consoleId, romFilename);
+        const metadata = await this.searchAndFetchGame(gameName, consoleId, romFilename, romData);
         if (metadata) {
           await gameDatabaseService.saveGame(metadata);
           return metadata;
@@ -105,12 +107,13 @@ export class IgdbApiService {
   }
 
   /**
-   * Search game by clean name and platform IDs on IGDB API v4
+   * Search game by clean name, CRC32, and platform IDs on IGDB API v4
    */
   public async searchAndFetchGame(
     gameName: string,
     consoleId: string,
-    romFilename: string
+    romFilename: string,
+    romData?: Uint8Array
   ): Promise<IgdbGameMetadata | null> {
     const creds = igdbConfigService.getCredentials();
     const token = await igdbConfigService.getValidAccessToken();
@@ -124,7 +127,7 @@ export class IgdbApiService {
     if (!cleanTitle) return null;
 
     const platformIds = IGDB_PLATFORM_IDS[consoleId];
-       const headers = {
+    const headers = {
       "Client-ID": creds.clientId,
       Authorization: `Bearer ${token}`,
       "Content-Type": "text/plain",
@@ -133,8 +136,27 @@ export class IgdbApiService {
 
     let gameData: any = null;
 
+    // Pass 0: Query IGDB /checksums by CRC32 if romData is provided
+    if (romData && romData.length > 0) {
+      try {
+        const crc = Crc32Service.calculate(romData).toLowerCase();
+        const checksumBody = `
+          fields checksum, game.name, game.summary, game.rating, game.cover.url, game.screenshots.url, game.genres.name, game.involved_companies.company.name, game.first_release_date;
+          where checksum = "${crc}";
+          limit 1;
+        `;
+        const pass0Result = await this.postIgdb("/checksums", headers, checksumBody);
+        if (Array.isArray(pass0Result) && pass0Result.length > 0 && pass0Result[0].game) {
+          gameData = pass0Result[0].game;
+          console.log(`[IGDB CRC Match Pass 0] Found game for CRC ${crc}: "${gameData.name}"`);
+        }
+      } catch (e) {
+        console.warn("[IGDB Pass 0 CRC Query Failed]", e);
+      }
+    }
+
     // Pass 1: Platform-filtered search (NES / Famicom, SNES / Super Famicom, etc.)
-    if (platformIds) {
+    if (!gameData && platformIds) {
       try {
         const platformBody = `
           search "${cleanTitle}";
@@ -190,7 +212,7 @@ export class IgdbApiService {
       }
     }
 
-    if (!gameData || !gameData.name) {
+    if (!gameData || (!gameData.name && !gameData.cover)) {
       return null;
     }
 
@@ -221,7 +243,7 @@ export class IgdbApiService {
     const metadata: IgdbGameMetadata = {
       romFilename,
       consoleId,
-      title: gameData.name || cleanTitle,
+      title: cleanTitle || gameData.name,
       coverUrl,
       screenshots,
       genres,

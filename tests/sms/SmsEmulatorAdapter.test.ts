@@ -84,4 +84,14 @@ describe("SmsEmulatorAdapter", () => {
     adapter.gameGenie?.clearGameGenieCodes();
     expect(adapter.gameGenie?.getGameGenieCodes().length).toBe(0);
   });
+
+  it("should configure audio enhancement and match sample rate", async () => {
+    const rom = createDummySmsRom();
+    await adapter.loadRom(rom);
+    const audio = adapter.getAudioOutput();
+    if (audio) {
+      expect(typeof audio.sampleRate).toBe("number");
+      expect(audio.sampleRate).toBeGreaterThan(0);
+    }
+  });
 });

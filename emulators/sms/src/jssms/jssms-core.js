@@ -560,6 +560,35 @@ JSSMS.prototype = {
     //setFrameSkip(frameSkip);
   },
 
+  /**
+   * Dynamically update sample rate and rebuild sound buffers/clocks.
+   * @param {number} rate
+   */
+  setSampleRate: function(rate) {
+    if (typeof rate === 'number' && rate > 0 && SAMPLE_RATE !== rate) {
+      SAMPLE_RATE = rate;
+      var clockSpeedHz = this.system === SYSTEM_PAL ? CLOCK_PAL : CLOCK_NTSC;
+      if (this.soundEnabled && this.psg) {
+        this.psg.init(clockSpeedHz);
+        this.samplesPerFrame = Math.round(SAMPLE_RATE / this.fps);
+        if (this.audioContext && typeof this.audioContext.createBuffer === 'function') {
+          this.audioBuffer = this.audioContext.createBuffer(1, this.samplesPerFrame, SAMPLE_RATE);
+        } else {
+          this.audioBuffer = { length: this.samplesPerFrame, getChannelData: function() { return new Float32Array(this.samplesPerFrame); } };
+        }
+        if (this.no_of_scanlines > 0) {
+          this.samplesPerLine = new Array(this.no_of_scanlines);
+          var fractional = 0;
+          for (var i = 0; i < this.no_of_scanlines; i++) {
+            var v = (this.samplesPerFrame << 16) / this.no_of_scanlines + fractional;
+            fractional = v - ((v >> 16) << 16);
+            this.samplesPerLine[i] = v >> 16;
+          }
+        }
+      }
+    }
+  },
+
   // Sound Output
   /**
    * @param {Array.<number>} buffer
@@ -9149,6 +9178,11 @@ JSSMS.SN76489 = function(sms) {
    * @type {Array.<number>}
    */
   this.outputChannel = new Array(4);
+
+  // Audio enhancement filter variables (DC removal & low-pass smoothing)
+  this.prevSample = 0;
+  this.smpAccum = 0;
+  this.lpSample = 0;
 };
 
 JSSMS.SN76489.prototype = {
@@ -9166,6 +9200,10 @@ JSSMS.SN76489.prototype = {
     this.regLatch = 0;
     this.noiseFreq = 0x10;
     this.noiseShiftReg = SHIFT_RESET;
+
+    this.prevSample = 0;
+    this.smpAccum = 0;
+    this.lpSample = 0;
 
     for (var i = 0; i < 4; i++) {
       // Set Tone Frequency (Don't want this to be zero)
@@ -9291,6 +9329,16 @@ JSSMS.SN76489.prototype = {
         this.outputChannel[3];
 
       output /= 0x80;
+
+      // High-pass DC offset removal filter:
+      var smpDiff = output - this.prevSample;
+      this.prevSample += smpDiff;
+      this.smpAccum += smpDiff - (this.smpAccum * 0.005);
+      output = this.smpAccum;
+
+      // Low-pass anti-aliasing smoothing filter:
+      this.lpSample += 0.4 * (output - this.lpSample);
+      output = this.lpSample;
 
       // Check boundaries
       if (output > 1) {

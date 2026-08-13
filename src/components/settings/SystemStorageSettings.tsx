@@ -4,6 +4,9 @@ import { storagePathService, getRomKey } from "../../services/StoragePathService
 import { romScannerService } from "../../services/RomScannerService";
 import { igdbConfigService } from "../../services/IgdbConfigService";
 import { igdbApiService } from "../../services/IgdbApiService";
+import { screenScraperApiService } from "../../services/ScreenScraperApiService";
+import { gameDatabaseService } from "../../services/GameDatabaseService";
+import { gameLibrary } from "../../emulator/GameLibrary";
 import { GameDefinition } from "../../emulator/types";
 import {
   Folder,
@@ -19,6 +22,8 @@ import {
   Trash2,
   Globe,
   Sparkles,
+  Image,
+  Database,
 } from "lucide-react";
 
 interface StorageRowItem {
@@ -37,13 +42,8 @@ interface RomFolderStatus {
   folderName: string | null;
 }
 
-interface IgdbSyncPrompt {
-  consoleId: string;
-  consoleName: string;
-  games: GameDefinition[];
-}
-
-interface IgdbSyncProgress {
+interface SyncProgress {
+  serviceName: string;
   consoleName: string;
   current: number;
   total: number;
@@ -96,12 +96,27 @@ export const SystemStorageSettings: React.FC = () => {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // IGDB prompt & progress state
-  const [igdbPrompt, setIgdbPrompt] = useState<IgdbSyncPrompt | null>(null);
-  const [igdbProgress, setIgdbProgress] = useState<IgdbSyncProgress | null>(null);
+  // Sync progress state
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
 
-  // On mount: check which consoles have stored handles
+  // Total loaded games across all ROM folders
+  const [totalGames, setTotalGames] = useState<GameDefinition[]>(() => gameLibrary.getAllGames());
+
+  // Local SQLite metadata DB state
+  const [dbCount, setDbCount] = useState<number>(0);
+
+  const refreshDbCount = () => {
+    gameDatabaseService.countGames().then((count) => setDbCount(count));
+  };
+
+  // On mount: subscribe to gameLibrary, check stored handles & load local DB count
   useEffect(() => {
+    refreshDbCount();
+
+    const unsubscribe = gameLibrary.subscribe(() => {
+      setTotalGames(gameLibrary.getAllGames());
+    });
+
     consoles.forEach(async (c) => {
       const has = await romScannerService.hasStoredHandle(c.id);
       if (has) {
@@ -111,7 +126,17 @@ export const SystemStorageSettings: React.FC = () => {
         }));
       }
     });
+
+    return unsubscribe;
   }, []);
+
+  const handleClearCache = async () => {
+    if (confirm("Voulez-vous vraiment vider la base de données SQLite locale des métadonnées de jeux ?")) {
+      await gameDatabaseService.clearDatabase();
+      refreshDbCount();
+      showSuccess("Base de données SQLite locale vidée avec succès !");
+    }
+  };
 
   const showSuccess = (msg: string) => {
     setSuccessMsg(msg);
@@ -174,6 +199,8 @@ export const SystemStorageSettings: React.FC = () => {
         },
       }));
 
+      setTotalGames(gameLibrary.getAllGames());
+
       if (result.count === 0) {
         showSuccess(
           `Aucun fichier ROM compatible trouvé dans ce dossier pour ${consoleName}.`
@@ -182,15 +209,6 @@ export const SystemStorageSettings: React.FC = () => {
         showSuccess(
           `${result.count} ROM${result.count > 1 ? "s" : ""} disponible${result.count > 1 ? "s" : ""} pour ${consoleName} !`
         );
-
-        // Offer IGDB metadata fetch if IGDB API is configured
-        if (igdbConfigService.isConfigured()) {
-          setIgdbPrompt({
-            consoleId,
-            consoleName,
-            games: result.games,
-          });
-        }
       }
     } catch (err: any) {
       setRomStatus((prev) => ({
@@ -202,12 +220,15 @@ export const SystemStorageSettings: React.FC = () => {
   };
 
   const handleStartIgdbSync = async () => {
-    if (!igdbPrompt) return;
-    const { consoleId, consoleName, games } = igdbPrompt;
-    setIgdbPrompt(null);
+    const games = gameLibrary.getAllGames();
+    if (games.length === 0) {
+      showError("Aucun jeu disponible dans vos dossiers ROMs à synchroniser.");
+      return;
+    }
 
-    setIgdbProgress({
-      consoleName,
+    setSyncProgress({
+      serviceName: "IGDB",
+      consoleName: "vos dossiers ROMs",
       current: 0,
       total: games.length,
       currentGameName: games[0]?.name || "",
@@ -216,8 +237,9 @@ export const SystemStorageSettings: React.FC = () => {
     let successCount = 0;
     for (let i = 0; i < games.length; i++) {
       const game = games[i];
-      setIgdbProgress({
-        consoleName,
+      setSyncProgress({
+        serviceName: "IGDB",
+        consoleName: "vos dossiers ROMs",
         current: i + 1,
         total: games.length,
         currentGameName: game.name,
@@ -226,8 +248,9 @@ export const SystemStorageSettings: React.FC = () => {
       try {
         const meta = await igdbApiService.getOrFetchMetadata(
           game.name,
-          consoleId,
-          game.filename || game.name
+          game.consoleId,
+          game.filename || game.name,
+          game.romData
         );
         if (meta) successCount++;
       } catch {
@@ -235,9 +258,56 @@ export const SystemStorageSettings: React.FC = () => {
       }
     }
 
-    setIgdbProgress(null);
+    setSyncProgress(null);
+    refreshDbCount();
     showSuccess(
-      `Synchronisation IGDB terminée ! ${successCount} jaquettes et métadonnées enregistrées dans la BDD SQLite.`
+      `Synchronisation IGDB terminée ! ${successCount} jaquette(s) & métadonnées enregistrées dans la BDD locale.`
+    );
+  };
+
+  const handleStartScreenScraperSync = async () => {
+    const games = gameLibrary.getAllGames();
+    if (games.length === 0) {
+      showError("Aucun jeu disponible dans vos dossiers ROMs à synchroniser.");
+      return;
+    }
+
+    setSyncProgress({
+      serviceName: "ScreenScraper",
+      consoleName: "vos dossiers ROMs",
+      current: 0,
+      total: games.length,
+      currentGameName: games[0]?.name || "",
+    });
+
+    let successCount = 0;
+    for (let i = 0; i < games.length; i++) {
+      const game = games[i];
+      setSyncProgress({
+        serviceName: "ScreenScraper",
+        consoleName: "vos dossiers ROMs",
+        current: i + 1,
+        total: games.length,
+        currentGameName: game.name,
+      });
+
+      try {
+        const meta = await screenScraperApiService.getOrFetchMetadata(
+          game.name,
+          game.consoleId,
+          game.filename || game.name,
+          game.romData
+        );
+        if (meta && meta.coverUrl) successCount++;
+      } catch {
+        // ignore individual failures
+      }
+    }
+
+    setSyncProgress(null);
+    refreshDbCount();
+    showSuccess(
+      `Synchronisation ScreenScraper terminée ! ${successCount} jaquette(s) & métadonnées enregistrées dans la BDD locale.`
     );
   };
 
@@ -247,8 +317,11 @@ export const SystemStorageSettings: React.FC = () => {
       ...prev,
       [consoleId]: { hasHandle: false, scanning: false, count: null, folderName: null },
     }));
+    setTotalGames(gameLibrary.getAllGames());
     showSuccess(`Dossier ROMs retiré pour ${consoleName}.`);
   };
+
+  const isIgdbConfigured = igdbConfigService.isConfigured();
 
   return (
     <div className="ctrl-settings">
@@ -301,51 +374,59 @@ export const SystemStorageSettings: React.FC = () => {
         </div>
       )}
 
-      {/* IGDB Prompt Modal / Banner */}
-      {igdbPrompt && (
-        <div
-          className="ctrl-bindings-panel"
-          style={{
-            padding: "16px 20px",
-            background: "rgba(0, 229, 255, 0.08)",
-            border: "1px solid rgba(0, 229, 255, 0.3)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <Globe size={20} color="var(--accent-cyan)" />
-              <div>
-                <strong style={{ color: "#ffffff", fontSize: "0.9rem" }}>
-                  API IGDB configurée — Télécharger les jaquettes &amp; métadonnées ?
-                </strong>
-                <p style={{ margin: "2px 0 0 0", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-                  Rechercher les jaquettes, éditeurs, notes et résumés pour les {igdbPrompt.games.length} jeux de {igdbPrompt.consoleName} et les stocker en BDD SQLite locale.
-                </p>
-              </div>
+      {/* Permanent Metadata Sync Banner */}
+      <div
+        className="ctrl-bindings-panel"
+        style={{
+          padding: "16px 20px",
+          background: "rgba(0, 229, 255, 0.08)",
+          border: "1px solid rgba(0, 229, 255, 0.3)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <Globe size={20} color="var(--accent-cyan)" />
+            <div>
+              <strong style={{ color: "#ffffff", fontSize: "0.9rem" }}>
+                Télécharger les jaquettes &amp; métadonnées ?
+              </strong>
+              <p style={{ margin: "2px 0 0 0", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
+                Rechercher les jaquettes pour les {totalGames.length} jeu{totalGames.length > 1 ? "x" : ""} disponible{totalGames.length > 1 ? "s" : ""} dans vos dossiers ROMs et les stocker en BDD locale.
+              </p>
             </div>
+          </div>
 
-            <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {isIgdbConfigured && (
               <button
                 className="ctrl-action-btn primary"
                 onClick={handleStartIgdbSync}
+                disabled={syncProgress !== null || totalGames.length === 0}
                 style={{ padding: "6px 14px", fontSize: "0.78rem" }}
               >
                 <Sparkles size={14} /> Synchroniser via IGDB
               </button>
-              <button
-                className="ctrl-action-btn secondary"
-                onClick={() => setIgdbPrompt(null)}
-                style={{ padding: "6px 12px", fontSize: "0.78rem" }}
-              >
-                Plus tard
-              </button>
-            </div>
+            )}
+
+            <button
+              className="ctrl-action-btn primary"
+              onClick={handleStartScreenScraperSync}
+              disabled={syncProgress !== null || totalGames.length === 0}
+              style={{
+                padding: "6px 14px",
+                fontSize: "0.78rem",
+                background: isIgdbConfigured ? "rgba(0, 229, 255, 0.15)" : undefined,
+                border: isIgdbConfigured ? "1px solid rgba(0, 229, 255, 0.3)" : undefined,
+              }}
+            >
+              <Image size={14} /> Synchroniser via ScreenScraper
+            </button>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* IGDB Progress Indicator */}
-      {igdbProgress && (
+      {/* Progress Indicator */}
+      {syncProgress && (
         <div
           className="ctrl-bindings-panel"
           style={{
@@ -358,16 +439,39 @@ export const SystemStorageSettings: React.FC = () => {
             <Loader2 size={20} color="#34d399" className="spin" />
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", fontWeight: 700, color: "#ffffff" }}>
-                <span>Recherche IGDB pour {igdbProgress.consoleName}…</span>
-                <span>{igdbProgress.current} / {igdbProgress.total}</span>
+                <span>Recherche {syncProgress.serviceName} pour {syncProgress.consoleName}…</span>
+                <span>{syncProgress.current} / {syncProgress.total}</span>
               </div>
               <p style={{ margin: "4px 0 0 0", fontSize: "0.78rem", color: "var(--text-secondary)" }}>
-                Jeu en cours : <strong style={{ color: "var(--accent-cyan)" }}>{igdbProgress.currentGameName}</strong>
+                Jeu en cours : <strong style={{ color: "var(--accent-cyan)" }}>{syncProgress.currentGameName}</strong>
               </p>
             </div>
           </div>
         </div>
       )}
+
+      {/* SQLite Local Database Caching Panel */}
+      <div className="ctrl-bindings-panel" style={{ padding: "20px" }}>
+        <div className="ctrl-bindings-header" style={{ margin: "-20px -20px 20px -20px" }}>
+          <Database size={18} color="var(--accent-cyan)" />
+          <span>Base de Données SQLite Locale (Mise en Cache)</span>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "16px" }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "#ffffff", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span>{dbCount} jeu{dbCount > 1 ? "x" : ""} enregistré{dbCount > 1 ? "s" : ""} dans la BDD SQLite locale</span>
+            </div>
+            <p style={{ margin: "4px 0 0 0", fontSize: "0.8rem", color: "var(--text-secondary)", maxWidth: "520px" }}>
+              Les jaquettes, résumés, genres et notes récupérés via ScreenScraper ou IGDB sont automatiquement conservés en base de données locale afin d'éviter les requêtes répétitives.
+            </p>
+          </div>
+
+          <button className="ctrl-action-btn secondary" onClick={handleClearCache} style={{ borderColor: "rgba(239, 68, 68, 0.4)", color: "#ef4444" }}>
+            <Trash2 size={15} /> Vider la BDD SQLite locale
+          </button>
+        </div>
+      </div>
 
       {/* Storage Table Panel */}
       <div className="ctrl-bindings-panel">

@@ -15,14 +15,14 @@ export function extractCleanRomTitle(rawName: string): string {
   // If filename had nested extension (e.g. game.nes.zip), strip second extension
   title = title.replace(/\.(nes|sfc|smc|gb|md|gen|sms|gg|bin|a26)$/gi, "");
 
-  // 3. Replace underscores with spaces
-  title = title.replace(/_/g, " ");
-
-  // 4. Remove parenthetical tags e.g. (USA), (Europe), (Japan), (En,Ja), (V1.0), (1982), (Atari), (PAL), (NTSC)
+  // 3. Remove parenthetical tags e.g. (USA, Europe, Brazil), (En), (Rev 1), (PAL), (NTSC), (Japan), (FR)
   title = title.replace(/\([^)]*\)/g, "");
 
-  // 5. Remove bracket tags e.g. [!], [b1], [h1], [t1], [a1]
+  // 4. Remove bracket tags e.g. [!], [b1], [h1], [t1], [a1]
   title = title.replace(/\[[^\]]*\]/g, "");
+
+  // 5. Replace dots, underscores, and asterisks with spaces
+  title = title.replace(/[._*]/g, " ");
 
   // 6. Clean up multiple spaces and trim
   title = title.replace(/\s+/g, " ").trim();

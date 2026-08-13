@@ -6,8 +6,9 @@ import { audioManager } from "../../emulator/AudioManager";
 import { gameDatabaseService, IgdbGameMetadata } from "../../services/GameDatabaseService";
 import { igdbConfigService } from "../../services/IgdbConfigService";
 import { igdbApiService } from "../../services/IgdbApiService";
+import { screenScraperApiService } from "../../services/ScreenScraperApiService";
 import { romTagService } from "../../services/RomTagService";
-import { Upload, Play, ArrowLeft, Gamepad2, Star, Sparkles, Loader2, Globe } from "lucide-react";
+import { Upload, Play, ArrowLeft, Gamepad2, Star, Sparkles, Loader2, Image } from "lucide-react";
 import { useConsoleWallpaper } from "../../hooks/useConsoleWallpaper";
 
 export const GameLibraryView: React.FC = () => {
@@ -22,11 +23,12 @@ export const GameLibraryView: React.FC = () => {
   );
   const [metadataMap, setMetadataMap] = useState<Record<string, IgdbGameMetadata>>({});
   const [syncingIgdb, setSyncingIgdb] = useState(false);
+  const [syncingScreenScraper, setSyncingScreenScraper] = useState(false);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
 
   const wallpaperUrl = useConsoleWallpaper(consoleDef?.id);
 
-  // Load cached IGDB metadata
+  // Load cached IGDB/ScreenScraper metadata
   const loadMetadata = () => {
     if (!consoleDef?.id) return;
     gameDatabaseService.getGamesForConsole(consoleDef.id).then((list) => {
@@ -80,7 +82,7 @@ export const GameLibraryView: React.FC = () => {
   };
 
   const handleSyncIgdb = async () => {
-    if (!consoleId || syncingIgdb) return;
+    if (!consoleId || syncingIgdb || syncingScreenScraper) return;
     setSyncingIgdb(true);
     setSyncMsg("Synchronisation avec l'API IGDB en cours…");
 
@@ -100,7 +102,33 @@ export const GameLibraryView: React.FC = () => {
 
     loadMetadata();
     setSyncingIgdb(false);
-    setSyncMsg(`${count} jaquette(s) & métadonnées enregistrées dans la BDD SQLite !`);
+    setSyncMsg(`${count} jaquette(s) & métadonnées enregistrées via IGDB !`);
+    setTimeout(() => setSyncMsg(null), 4000);
+  };
+
+  const handleSyncScreenScraper = async () => {
+    if (!consoleId || syncingIgdb || syncingScreenScraper) return;
+    setSyncingScreenScraper(true);
+    setSyncMsg("Synchronisation avec ScreenScraper en cours…");
+
+    let count = 0;
+    for (const g of games) {
+      try {
+        const meta = await screenScraperApiService.getOrFetchMetadata(
+          g.name,
+          consoleId,
+          g.filename || g.name,
+          g.romData
+        );
+        if (meta && meta.coverUrl) count++;
+      } catch {
+        // ignore
+      }
+    }
+
+    loadMetadata();
+    setSyncingScreenScraper(false);
+    setSyncMsg(`${count} jaquette(s) & métadonnées enregistrées via ScreenScraper !`);
     setTimeout(() => setSyncMsg(null), 4000);
   };
 
@@ -151,21 +179,40 @@ export const GameLibraryView: React.FC = () => {
           <div>
             <h1 className="page-title">{consoleDef.name}</h1>
             <p className="page-subtitle" style={{ marginBottom: 0 }}>
-              Bibliothèque de jeux ({games.length}) &amp; Métadonnées IGDB
+              Bibliothèque de jeux ({games.length}) &amp; Métadonnées
             </p>
           </div>
         </div>
 
-        {isIgdbConfigured && games.length > 0 && (
-          <button
-            className="ctrl-action-btn primary"
-            onClick={handleSyncIgdb}
-            disabled={syncingIgdb}
-            style={{ padding: "8px 16px", fontSize: "0.82rem" }}
-          >
-            {syncingIgdb ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
-            {syncingIgdb ? "Recherche IGDB…" : "Synchroniser jaquettes IGDB"}
-          </button>
+        {games.length > 0 && (
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+            {isIgdbConfigured && (
+              <button
+                className="ctrl-action-btn primary"
+                onClick={handleSyncIgdb}
+                disabled={syncingIgdb || syncingScreenScraper}
+                style={{ padding: "8px 16px", fontSize: "0.82rem" }}
+              >
+                {syncingIgdb ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
+                {syncingIgdb ? "Recherche IGDB…" : "Synchroniser via IGDB"}
+              </button>
+            )}
+
+            <button
+              className="ctrl-action-btn primary"
+              onClick={handleSyncScreenScraper}
+              disabled={syncingIgdb || syncingScreenScraper}
+              style={{
+                padding: "8px 16px",
+                fontSize: "0.82rem",
+                background: isIgdbConfigured ? "rgba(0, 229, 255, 0.15)" : undefined,
+                border: isIgdbConfigured ? "1px solid rgba(0, 229, 255, 0.3)" : undefined,
+              }}
+            >
+              {syncingScreenScraper ? <Loader2 size={16} className="spin" /> : <Image size={16} />}
+              {syncingScreenScraper ? "Recherche ScreenScraper…" : "Synchroniser via ScreenScraper"}
+            </button>
+          </div>
         )}
       </div>
 

@@ -135,6 +135,10 @@ export class GameLibrary {
     return Array.from(this.games.values()).filter((g) => g.consoleId === consoleId);
   }
 
+  public getAllGames(): GameDefinition[] {
+    return Array.from(this.games.values());
+  }
+
   public getGame(gameId: string): GameDefinition | undefined {
     return this.games.get(gameId);
   }

@@ -192,6 +192,11 @@ export class SmsEmulatorAdapter implements Emulator {
 
   public async loadRom(data: Uint8Array): Promise<void> {
     this.stop();
+    await audioManager.resume();
+    const sr = audioManager.getSampleRate();
+    if (this.sms && typeof this.sms.setSampleRate === "function") {
+      this.sms.setSampleRate(sr);
+    }
 
     const success = this.sms.readRomDirectly(data, "game.sms");
     if (!success) {
@@ -203,6 +208,7 @@ export class SmsEmulatorAdapter implements Emulator {
       this.sms.vdp.removeSpriteLimit = true;
     }
     this.reapplyPatches();
+    audioManager.clear();
   }
 
   public start(): void {
@@ -210,7 +216,13 @@ export class SmsEmulatorAdapter implements Emulator {
     this.isRunning = true;
     this.isPaused = false;
     this.lastFrameTime = 0;
-    audioManager.resume().catch(() => {});
+    audioManager.resume().then(() => {
+      const sr = audioManager.getSampleRate();
+      if (this.sms && typeof this.sms.setSampleRate === "function") {
+        this.sms.setSampleRate(sr);
+      }
+    }).catch(() => {});
+    audioManager.clear();
     this.loop();
   }
 
@@ -225,7 +237,13 @@ export class SmsEmulatorAdapter implements Emulator {
     }
     this.isPaused = false;
     this.lastFrameTime = 0;
-    audioManager.resume().catch(() => {});
+    audioManager.resume().then(() => {
+      const sr = audioManager.getSampleRate();
+      if (this.sms && typeof this.sms.setSampleRate === "function") {
+        this.sms.setSampleRate(sr);
+      }
+    }).catch(() => {});
+    audioManager.clear();
   }
 
   public reset(): void {
@@ -264,7 +282,8 @@ export class SmsEmulatorAdapter implements Emulator {
     // Stream generated audio samples to Web Audio API
     if (this.audioSamples.length > 0) {
       const samples = new Float32Array(this.audioSamples);
-      audioManager.playBuffer(samples, 44100);
+      const sr = audioManager.getSampleRate();
+      audioManager.playBuffer(samples, sr);
       this.audioSamples = [];
     }
 
@@ -322,7 +341,7 @@ export class SmsEmulatorAdapter implements Emulator {
     this.audioSamples = [];
     return {
       getSamples: () => samples,
-      sampleRate: 44100,
+      sampleRate: audioManager.getSampleRate(),
     };
   }
 
