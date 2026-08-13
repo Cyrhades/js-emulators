@@ -5,7 +5,7 @@ import ChannelSquare from "./channel-square.js";
 import ChannelTriangle from "./channel-triangle.js";
 
 const CPU_FREQ_NTSC = 1789772.727272727; // 21.477272727 MHz / 12 (exact NTSC CPU frequency)
-// const CPU_FREQ_PAL = 1773447.4;
+const CPU_FREQ_PAL = 1662607; // 26.6017125 MHz / 16 (exact PAL CPU frequency)
 
 // Frame counter step timing tables (in CPU cycles).
 // The APU frame counter fires at these specific cycle positions within each
@@ -68,9 +68,7 @@ class PAPU {
     }
 
     this.sampleRate = this.nes.opts.sampleRate;
-    this.sampleTimerMax = Math.floor(
-      (1024.0 * CPU_FREQ_NTSC) / this.sampleRate,
-    );
+    this.updateSampleTimer();
     this.sampleTimer = 0;
     this.updateChannelEnable(0);
     this.frameCycleCounter = 0;
@@ -684,20 +682,32 @@ class PAPU {
     return 0;
   }
 
+  getCpuFrequency() {
+    return this.nes.rom && this.nes.rom.isPal() ? CPU_FREQ_PAL : CPU_FREQ_NTSC;
+  }
+
+  updateSampleTimer() {
+    const cpuFreq = this.getCpuFrequency();
+    this.sampleTimerMax = Math.floor((1024.0 * cpuFreq) / this.sampleRate);
+  }
+
+  resetRegion() {
+    this.initDmcFrequencyLookup();
+    this.initNoiseWavelengthLookup();
+    this.updateSampleTimer();
+  }
+
   setSampleRate(rate) {
     this.sampleRate = rate;
-    this.sampleTimerMax = Math.floor(
-      (1024.0 * CPU_FREQ_NTSC) / this.sampleRate,
-    );
+    this.updateSampleTimer();
   }
 
   // Recalculate the sample timer for a non-standard host frame rate.
-  // At 60fps the timer fires once per (CPU_FREQ / sampleRate) cycles. If the
-  // host calls frame() at a different rate, scale proportionally so the total
-  // audio output per second stays constant.
   setFrameRate(rate) {
+    const targetFps = this.nes.rom && this.nes.rom.isPal() ? 50.007 : 60.098;
+    const cpuFreq = this.getCpuFrequency();
     this.sampleTimerMax = Math.floor(
-      (1024.0 * CPU_FREQ_NTSC * rate) / (this.sampleRate * 60.0),
+      (1024.0 * cpuFreq * rate) / (this.sampleRate * targetFps),
     );
   }
 
@@ -756,46 +766,31 @@ class PAPU {
   }
 
   initDmcFrequencyLookup() {
-    this.dmcFreqLookup = new Array(16);
-
-    this.dmcFreqLookup[0x0] = 0xd60;
-    this.dmcFreqLookup[0x1] = 0xbe0;
-    this.dmcFreqLookup[0x2] = 0xaa0;
-    this.dmcFreqLookup[0x3] = 0xa00;
-    this.dmcFreqLookup[0x4] = 0x8f0;
-    this.dmcFreqLookup[0x5] = 0x7f0;
-    this.dmcFreqLookup[0x6] = 0x710;
-    this.dmcFreqLookup[0x7] = 0x6b0;
-    this.dmcFreqLookup[0x8] = 0x5f0;
-    this.dmcFreqLookup[0x9] = 0x500;
-    this.dmcFreqLookup[0xa] = 0x470;
-    this.dmcFreqLookup[0xb] = 0x400;
-    this.dmcFreqLookup[0xc] = 0x350;
-    this.dmcFreqLookup[0xd] = 0x2a0;
-    this.dmcFreqLookup[0xe] = 0x240;
-    this.dmcFreqLookup[0xf] = 0x1b0;
-    //for(int i=0;i<16;i++)dmcFreqLookup[i]/=8;
+    const isPal = !!(this.nes.rom && this.nes.rom.isPal());
+    const table = isPal
+      ? [
+          0xc68, 0xb00, 0x9d8, 0x940, 0x848, 0x758, 0x6b0, 0x628, 0x588, 0x4a0,
+          0x418, 0x3b8, 0x310, 0x270, 0x210, 0x190,
+        ]
+      : [
+          0xd60, 0xbe0, 0xaa0, 0xa00, 0x8f0, 0x7f0, 0x710, 0x6b0, 0x5f0, 0x500,
+          0x470, 0x400, 0x350, 0x2a0, 0x240, 0x1b0,
+        ];
+    this.dmcFreqLookup = table;
   }
 
   initNoiseWavelengthLookup() {
-    this.noiseWavelengthLookup = new Array(16);
-
-    this.noiseWavelengthLookup[0x0] = 0x004;
-    this.noiseWavelengthLookup[0x1] = 0x008;
-    this.noiseWavelengthLookup[0x2] = 0x010;
-    this.noiseWavelengthLookup[0x3] = 0x020;
-    this.noiseWavelengthLookup[0x4] = 0x040;
-    this.noiseWavelengthLookup[0x5] = 0x060;
-    this.noiseWavelengthLookup[0x6] = 0x080;
-    this.noiseWavelengthLookup[0x7] = 0x0a0;
-    this.noiseWavelengthLookup[0x8] = 0x0ca;
-    this.noiseWavelengthLookup[0x9] = 0x0fe;
-    this.noiseWavelengthLookup[0xa] = 0x17c;
-    this.noiseWavelengthLookup[0xb] = 0x1fc;
-    this.noiseWavelengthLookup[0xc] = 0x2fa;
-    this.noiseWavelengthLookup[0xd] = 0x3f8;
-    this.noiseWavelengthLookup[0xe] = 0x7f2;
-    this.noiseWavelengthLookup[0xf] = 0xfe4;
+    const isPal = !!(this.nes.rom && this.nes.rom.isPal());
+    const table = isPal
+      ? [
+          0x004, 0x008, 0x00e, 0x01e, 0x03c, 0x058, 0x076, 0x094, 0x0bc, 0x0ec,
+          0x162, 0x1d8, 0x2c4, 0x3b0, 0x762, 0xec2,
+        ]
+      : [
+          0x004, 0x008, 0x010, 0x020, 0x040, 0x060, 0x080, 0x0a0, 0x0ca, 0x0fe,
+          0x17c, 0x1fc, 0x2fa, 0x3f8, 0x7f2, 0xfe4,
+        ];
+    this.noiseWavelengthLookup = table;
   }
 
   initDACtables() {

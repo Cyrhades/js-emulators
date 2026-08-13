@@ -156,4 +156,69 @@ describe("NesEmulatorAdapter", () => {
     expect(adapter.saveData).toBeDefined();
     expect(adapter.saveData.hasSaveData()).toBe(false);
   });
+
+  it("should detect PAL mode correctly for iNES 1.0 and NES 2.0 headers", () => {
+    const romData = createMinimalNesRom();
+    // iNES 1.0 PAL flag on byte 9
+    romData[9] = 1;
+    (adapter as any).nes.loadROM(romData);
+    expect((adapter as any).nes.rom.isPal()).toBe(true);
+
+    // NES 2.0 header: byte 7 bit 2..3 = 2 (NES 2.0 signature)
+    const nes2Rom = createMinimalNesRom();
+    nes2Rom[7] = (nes2Rom[7] & 0xf3) | 0x08;
+    // timing mode = 1 (PAL)
+    nes2Rom[12] = 1;
+    (adapter as any).nes.loadROM(nes2Rom);
+    expect((adapter as any).nes.rom.isPal()).toBe(true);
+
+    // Dendy timing mode = 3
+    nes2Rom[12] = 3;
+    (adapter as any).nes.loadROM(nes2Rom);
+    expect((adapter as any).nes.rom.isPal()).toBe(true);
+  });
+
+  it("should handle Mapper 7 bus conflict submappers correctly", () => {
+    // Create a 128KB ROM (8 x 16KB PRG banks = 4 x 32KB banks)
+    const header = new Uint8Array(16);
+    header[0] = 0x4e; header[1] = 0x45; header[2] = 0x53; header[3] = 0x1a;
+    header[4] = 8;    // 8 x 16KB PRG ROM
+    header[5] = 0;    // 0 CHR
+    header[6] = 0x70; // Mapper 7 low
+    header[7] = 0x08; // NES 2.0 signature
+    header[8] = 0x10; // Submapper 1
+
+    const prgRom = new Uint8Array(128 * 1024);
+    // Fill bank 0 with 0x00
+    prgRom.fill(0x00, 0, 32768);
+    // Fill 32KB bank 2 (16KB banks 4+5) at offset 64KB with 0x55
+    prgRom.fill(0x55, 64 * 1024, 96 * 1024);
+
+    const fullRom = new Uint8Array(16 + 128 * 1024);
+    fullRom.set(header, 0);
+    fullRom.set(prgRom, 16);
+
+    // Submapper 1 (ANROM): NO bus conflicts (subMapper === 1)
+    (adapter as any).nes.loadROM(fullRom);
+    expect((adapter as any).nes.rom.subMapper).toBe(1);
+    // Write 0x02 to select 32KB bank 2 when memory currently holds 0x00
+    (adapter as any).nes.mmap.write(0x8000, 0x02);
+    // Bus conflict disabled -> bank 2 selected, cpu.mem[0x8000] becomes 0x55
+    expect((adapter as any).nes.cpu.mem[0x8000]).toBe(0x55);
+
+    // Submapper 0 (default): WITH bus conflicts
+    fullRom[8] = 0x00;
+    (adapter as any).nes.loadROM(fullRom);
+    expect((adapter as any).nes.rom.subMapper).toBe(0);
+    // Write 0x02 when memory holds 0x00 -> 0x02 & 0x00 = 0x00 -> bank 0 selected
+    (adapter as any).nes.mmap.write(0x8000, 0x02);
+    expect((adapter as any).nes.cpu.mem[0x8000]).toBe(0x00);
+
+    // Submapper 2 (AMROM/AOROM): WITH bus conflicts
+    fullRom[8] = 0x20;
+    (adapter as any).nes.loadROM(fullRom);
+    expect((adapter as any).nes.rom.subMapper).toBe(2);
+    (adapter as any).nes.mmap.write(0x8000, 0x02);
+    expect((adapter as any).nes.cpu.mem[0x8000]).toBe(0x00);
+  });
 });

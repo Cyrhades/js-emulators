@@ -20,6 +20,10 @@ export default class FrameTimer {
     this.lastFrameTime = 0;
   }
 
+  setFrameRate(fps) {
+    this.interval = 1e3 / (fps || FPS);
+  }
+
   start() {
     this.running = true;
     this.lastFrameTime = 0;

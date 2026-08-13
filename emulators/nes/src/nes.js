@@ -14,7 +14,6 @@ class NES {
       onBatteryRamWrite: function () {},
 
       emulateSound: true,
-      removeSpriteLimit: true,
       sampleRate: 48000, // Sound sample rate in hz
 
       ...opts,
@@ -26,7 +25,6 @@ class NES {
     };
     this.cpu = new CPU(this);
     this.ppu = new PPU(this);
-    this.ppu.removeSpriteLimit = !!this.opts.removeSpriteLimit;
     this.papu = new PAPU(this);
     this.gameGenie = new GameGenie();
     this.gameGenie.onChange = () => this.cpu._updateCartridgeLoader();
@@ -101,7 +99,7 @@ class NES {
           // DMA halt cycles: step PPU per cycle. APU is clocked in bulk.
           let chunk = Math.min(cpu.cyclesToHalt, 8);
           for (let i = 0; i < chunk; i++) {
-            ppu.advanceDots(3);
+            cpu.advancePpuDots();
           }
           papu.clockFrameCounter(chunk);
           cpu.cyclesToHalt -= chunk;
@@ -161,12 +159,48 @@ class NES {
     }
   }
 
+  // Returns whether the loaded ROM has battery-backed PRG-RAM (SRAM/EEPROM).
+  hasBatteryRam() {
+    return !!(this.rom && (this.rom.hasBatteryRam || this.rom.batteryRam));
+  }
+
+  // Returns a copy of the battery-backed PRG-RAM ($6000-$7FFF, 8KB) as a Uint8Array.
+  getBatteryRam() {
+    if (!this.cpu || !this.cpu.mem) {
+      return new Uint8Array(0x2000);
+    }
+    return new Uint8Array(this.cpu.mem.slice(0x6000, 0x8000));
+  }
+
+  // Set/load battery-backed PRG-RAM ($6000-$7FFF) into the emulator.
+  setBatteryRam(data) {
+    if (!data) return;
+    if (this.rom) {
+      this.rom.setBatteryRamData(data);
+    }
+    if (this.mmap) {
+      this.mmap.loadBatteryRam();
+    }
+  }
+
+  loadBatteryRam(data) {
+    this.setBatteryRam(data);
+  }
+
+  getSaveData() {
+    return this.getBatteryRam();
+  }
+
+  loadSaveData(data) {
+    this.setBatteryRam(data);
+  }
+
   // Loads a ROM file into the CPU and PPU.
   // The ROM file is validated first.
-  loadROM(data) {
+  loadROM(data, batteryRamData = null) {
     // Load ROM file:
     this.rom = new ROM(this);
-    this.rom.load(data);
+    this.rom.load(data, batteryRamData);
 
     this.reset();
     this.mmap = this.rom.createMapper();
@@ -180,6 +214,17 @@ class NES {
 
     this.mmap.loadROM();
     this.romData = data;
+
+    if (this.rom.isPal()) {
+      this.setFramerate(50.007);
+    } else {
+      this.setFramerate(60.098);
+    }
+    this.papu.resetRegion();
+
+    if (batteryRamData) {
+      this.setBatteryRam(batteryRamData);
+    }
   }
 
   setSampleRate(rate) {
@@ -193,19 +238,6 @@ class NES {
   // frequently per CPU cycle so each frame still fills the audio buffer.
   setFramerate(rate) {
     this.papu.setFrameRate(rate);
-  }
-
-  getSaveData() {
-    return this.rom ? this.rom.getSaveData() : null;
-  }
-
-  loadSaveData(data) {
-    if (this.rom) {
-      this.rom.setSaveData(data);
-      if (this.mmap) {
-        this.mmap.loadBatteryRam();
-      }
-    }
   }
 
   toJSON() {

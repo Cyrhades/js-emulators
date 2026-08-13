@@ -136,7 +136,7 @@ class PPU {
 
     // Feature: Remove 8-sprite-per-scanline hardware limit to prevent sprite flickering
     // and disappearing sprites when multiple sprites align on the same scanline.
-    this.removeSpriteLimit = true;
+    this.removeSpriteLimit = false;
 
     // Per-scanline sprite evaluation results. Evaluation on visible scanline N
     // determines which sprites appear on scanline N+1. Because jsnes uses
@@ -180,6 +180,26 @@ class PPU {
 
     this.updateControlReg1(0);
     this.updateControlReg2(0);
+  }
+
+  get isPal() {
+    return !!(this.nes && this.nes.rom && this.nes.rom.isPal());
+  }
+
+  get preRenderScanline() {
+    return this.isPal ? 70 : 20;
+  }
+
+  get visibleStartScanline() {
+    return this.isPal ? 71 : 21;
+  }
+
+  get visibleEndScanline() {
+    return this.isPal ? 310 : 260;
+  }
+
+  get postRenderScanline() {
+    return this.isPal ? 311 : 261;
   }
 
   // Sets Nametable mirroring.
@@ -350,6 +370,8 @@ class PPU {
   // signaling the frame loop to break after the current instruction.
   advanceDots(dots) {
     let finalCurX = this.curX + dots;
+    let preRender = this.preRenderScanline;
+    let visStart = this.visibleStartScanline;
 
     // Fast path: skip dot-by-dot when no per-dot events can fire.
     // This handles ~99% of calls since VBlank, sprite 0, and scanline
@@ -362,7 +384,7 @@ class PPU {
         this.curX <= 1 &&
         finalCurX >= 1
       ) &&
-      !(this.scanline === 20 && this.curX <= 1 && finalCurX >= 1) &&
+      !(this.scanline === preRender && this.curX <= 1 && finalCurX >= 1) &&
       (this.spr0HitX < this.curX || this.spr0HitX >= finalCurX)
     ) {
       this.curX = finalCurX;
@@ -379,8 +401,8 @@ class PPU {
         continue;
       }
 
-      // VBlank clear at dot 1 of scanline 20 (NES scanline 261, pre-render).
-      if (this.scanline === 20 && this.curX === 1) {
+      // VBlank clear at dot 1 of pre-render scanline.
+      if (this.scanline === preRender && this.curX === 1) {
         this._fireVblankClear(cpu, i === dots - 1);
       }
 
@@ -391,7 +413,7 @@ class PPU {
         this.curX === this.spr0HitX &&
         this.f_bgVisibility === 1 &&
         this.f_spVisibility === 1 &&
-        this.scanline - 21 === this.spr0HitY
+        this.scanline - visStart === this.spr0HitY
       ) {
         this.setStatusFlag(this.STATUS_SPRITE0HIT, true);
       }
@@ -413,102 +435,121 @@ class PPU {
     if (this.scanline === 0 && this.curX === 1 && this.vblankPending) {
       this._fireVblankSet(cpu, 0);
     }
-    if (this.scanline === 20 && this.curX === 1) {
+    if (this.scanline === preRender && this.curX === 1) {
       // isLastDot=true: the loop exhausted all dots so φ2 has sampled.
       this._fireVblankClear(cpu, true);
     }
   }
 
   endScanline() {
-    switch (this.scanline) {
-      case 19:
-        // Dummy scanline.
-        // May be variable length:
-        if (this.dummyCycleToggle) {
-          // Remove dead cycle at end of scanline,
-          // for next scanline:
-          this.curX = 1;
-          this.dummyCycleToggle = !this.dummyCycleToggle;
-        }
-        break;
+    let preRender = this.preRenderScanline;
+    let postRender = this.postRenderScanline;
+    let visStart = this.visibleStartScanline;
+    let visEnd = this.visibleEndScanline;
 
-      case 20:
-        // Pre-render scanline (NES scanline 261). VBlank and sprite 0 hit
-        // flags are cleared at dot 1, handled by the frame loop and catch-up
-        // loop for cycle-accurate timing.
+    if (this.scanline === preRender - 1) {
+      // Dummy scanline.
+      if (this.dummyCycleToggle) {
+        // Remove dead cycle at end of scanline, for next scanline:
+        this.curX = 1;
+        this.dummyCycleToggle = !this.dummyCycleToggle;
+      }
+    } else if (this.scanline === preRender) {
+      // Pre-render scanline. VBlank and sprite 0 hit flags cleared at dot 1.
+      this.performOAMCorruption();
 
-        // OAM corruption: if OAMADDR != 0 at the beginning of the pre-render
-        // scanline, the 8 bytes at (OAMADDR & $F8) overwrite OAM[0..7].
-        // This happens BEFORE the OAMADDR reset at cycles 257-320.
-        // See https://www.nesdev.org/wiki/PPU_OAM#Sprite_0_corruption
-        this.performOAMCorruption();
+      if (this.f_bgVisibility === 1 || this.f_spVisibility === 1) {
+        // Update counters:
+        this.cntFV = this.regFV;
+        this.cntV = this.regV;
+        this.cntH = this.regH;
+        this.cntVT = this.regVT;
+        this.cntHT = this.regHT;
 
         if (this.f_bgVisibility === 1 || this.f_spVisibility === 1) {
-          // Update counters:
-          this.cntFV = this.regFV;
-          this.cntV = this.regV;
-          this.cntH = this.regH;
-          this.cntVT = this.regVT;
+          // Render dummy scanline:
+          this.renderBgScanline(false, 0);
+        }
+
+        let stride = this.removeSpriteLimit ? 256 : 32;
+        this.scanlineSpriteCount[0] = 0;
+        this.scanlineSprite0[0] = 0;
+        for (let i = 0; i < stride; i++) {
+          this.scanlineSecondaryOAM[i] = 0xff;
+        }
+
+        let scanline0Base = 1 * stride;
+        for (let i = 0; i < 32; i++) {
+          this.scanlineSecondaryOAM[scanline0Base + i] = this.secondaryOAM[i];
+        }
+        this.scanlineSpriteCount[1] = this.spritesFound;
+        this.scanlineSprite0[1] = this.sprite0InSecondary ? 1 : 0;
+
+        this.sramAddress = 0;
+      }
+
+      if (this.f_bgVisibility === 1 && this.f_spVisibility === 1) {
+        this.checkSprite0(0);
+      }
+
+      if (
+        !this.hitSpr0 &&
+        this.f_bgVisibility === 1 &&
+        this.f_spVisibility === 1
+      ) {
+        if (this._precomputeSprite0Hit(1)) {
+          this.hitSpr0 = true;
+        }
+      }
+
+      if (this.f_bgVisibility === 1 || this.f_spVisibility === 1) {
+        // Clock mapper IRQ Counter:
+        this.nes.mmap.clockIrqCounter();
+      }
+    } else if (this.scanline === postRender) {
+      // Post-render scanline, no rendering.
+      this.vblankPending = true;
+
+      // Wrap around:
+      this.scanline = -1; // will be incremented to 0
+    } else if (this.scanline >= visStart && this.scanline <= visEnd) {
+      // NES visible scanline index (0-239).
+      let bufferScan = this.scanline + 1 - visStart;
+
+      this.performOAMCorruption();
+
+      if (this.f_bgVisibility === 1 || this.f_spVisibility === 1) {
+        if (!this.scanlineAlreadyRendered) {
+          // update scroll:
           this.cntHT = this.regHT;
+          this.cntH = this.regH;
+          this.renderBgScanline(true, bufferScan);
+        }
+        this.scanlineAlreadyRendered = false;
 
-          // On real hardware, the PPU runs a unified rendering pipeline
-          // whenever either BG or sprites is enabled. BG tile fetches and
-          // shift register loading happen regardless of which specific layer
-          // flag is set. The individual visibility flags only affect the
-          // final pixel output stage.
-          // See https://www.nesdev.org/wiki/PPU_rendering
-          if (this.f_bgVisibility === 1 || this.f_spVisibility === 1) {
-            // Render dummy scanline:
-            this.renderBgScanline(false, 0);
+        // Check for sprite 0 hit on this scanline.
+        if (
+          !this.hitSpr0 &&
+          this.f_bgVisibility === 1 &&
+          this.f_spVisibility === 1 &&
+          this.scanlineSprite0[bufferScan]
+        ) {
+          if (this.checkSprite0(bufferScan)) {
+            this.hitSpr0 = true;
           }
-
-          // Sprite evaluation does NOT happen on the pre-render scanline, and
-          // secondary OAM is NOT cleared either. The pre-render scanline's sprite
-          // tile loading (cycles 257-320) reads from the stale secondary OAM left
-          // over from the last visible scanline's evaluation. If any stale sprites
-          // happen to be at Y=0, they will render on NES scanline 0.
-          // See https://www.nesdev.org/wiki/PPU_sprite_evaluation
-          //
-          // Buffer row 0 is the pre-render dummy row (no sprites).
-          let stride = this.removeSpriteLimit ? 256 : 32;
-          this.scanlineSpriteCount[0] = 0;
-          this.scanlineSprite0[0] = 0;
-          for (let i = 0; i < stride; i++) {
-            this.scanlineSecondaryOAM[i] = 0xff;
-          }
-
-          // Buffer row 1 = NES scanline 0. Copy stale secondary OAM data from
-          // the last evaluation (preserved in this.secondaryOAM). On real hardware,
-          // the secondary OAM register persists and the pre-render scanline doesn't
-          // clear it, allowing stale sprites to appear on scanline 0.
-          // See AccuracyCoin "Sprites on Scanline 0" test.
-          let scanline0Base = 1 * stride;
-          for (let i = 0; i < 32; i++) {
-            this.scanlineSecondaryOAM[scanline0Base + i] = this.secondaryOAM[i];
-          }
-          this.scanlineSpriteCount[1] = this.spritesFound;
-          this.scanlineSprite0[1] = this.sprite0InSecondary ? 1 : 0;
-
-          // OAMADDR is reset to 0 during sprite tile loading (cycles 257-320).
-          this.sramAddress = 0;
         }
 
-        if (this.f_bgVisibility === 1 && this.f_spVisibility === 1) {
-          // Check sprite 0 hit for dummy scanline (buffer row 0).
-          this.checkSprite0(0);
+        if (bufferScan < 240) {
+          this.evaluateSprites(bufferScan + 1);
         }
 
-        // Pre-compute sprite 0 hit for the first visible scanline (buffer
-        // row 1). The dummy render above advanced the scroll counters to point
-        // at row 1's vertical position, and the secondary OAM for row 1 was
-        // set up from stale data above. This allows the dot-by-dot loop in
-        // step() to detect the hit at the correct PPU dot during scanline 21.
         if (
           !this.hitSpr0 &&
           this.f_bgVisibility === 1 &&
           this.f_spVisibility === 1
         ) {
-          if (this._precomputeSprite0Hit(1)) {
+          this._precomputeSprite0Hit(bufferScan + 1);
+          if (this.spr0HitX !== -1) {
             this.hitSpr0 = true;
           }
         }
@@ -517,97 +558,7 @@ class PPU {
           // Clock mapper IRQ Counter:
           this.nes.mmap.clockIrqCounter();
         }
-        break;
-
-      case 261:
-        // Post-render scanline (NES scanline 240), no rendering.
-        // VBlank flag is set at dot 1 of the NEXT scanline (scanline 0 / NES 241)
-        // by the frame loop and catch-up loop, gated on vblankPending.
-        this.vblankPending = true;
-
-        // Wrap around:
-        this.scanline = -1; // will be incremented to 0
-
-        break;
-
-      default:
-        if (this.scanline >= 21 && this.scanline <= 260) {
-          // NES visible scanline index (0-239). The PPU's internal scanline
-          // counter starts at 0 for VBlank, 20 for pre-render, 21 for the
-          // first visible scanline. The buffer row is scanline - 20 (1-240),
-          // offset by 1 because the pre-render scanline renders row 0.
-          let bufferScan = this.scanline + 1 - 21;
-
-          // OAM corruption at the start of each visible scanline.
-          // Normally OAMADDR is 0 here (reset by evaluation on the previous
-          // scanline), but writes to $2003 during rendering can trigger this.
-          this.performOAMCorruption();
-
-          // Render normally. On real hardware the PPU runs a unified
-          // rendering pipeline when either BG or sprites is enabled — BG
-          // tile fetches, shift register loading, and VRAM address
-          // increments all happen regardless of which layer flag is set.
-          // The individual visibility flags only suppress the final pixel
-          // output. We must always populate bgbuffer/pixrendered so that
-          // sprite 0 hit detection works even when BG was briefly disabled.
-          // See https://www.nesdev.org/wiki/PPU_rendering
-          if (this.f_bgVisibility === 1 || this.f_spVisibility === 1) {
-            if (!this.scanlineAlreadyRendered) {
-              // update scroll:
-              this.cntHT = this.regHT;
-              this.cntH = this.regH;
-              this.renderBgScanline(true, bufferScan);
-            }
-            this.scanlineAlreadyRendered = false;
-
-            // Check for sprite 0 hit on this scanline.
-            // Only check if sprite 0 is in the secondary OAM for this scanline
-            // (determined by evaluation on the previous scanline).
-            // Sprite 0 hit requires BOTH BG and sprite rendering to be enabled.
-            if (
-              !this.hitSpr0 &&
-              this.f_bgVisibility === 1 &&
-              this.f_spVisibility === 1 &&
-              this.scanlineSprite0[bufferScan]
-            ) {
-              if (this.checkSprite0(bufferScan)) {
-                this.hitSpr0 = true;
-              }
-            }
-          }
-
-          // Evaluate sprites for the NEXT scanline. On real hardware this
-          // happens during cycles 65-256 of each visible scanline. Evaluation
-          // on scanline N determines sprites for scanline N+1.
-          // The evaluation target is bufferScan+1 because sprites have a +1 Y
-          // offset (sprite Y=0 renders on display row 1, not row 0).
-          // See https://www.nesdev.org/wiki/PPU_sprite_evaluation
-          if (bufferScan < 240) {
-            this.evaluateSprites(bufferScan + 1);
-          }
-
-          // Pre-compute sprite 0 hit for the NEXT visible scanline. The BG
-          // render above advanced the scroll counters to the next row, and
-          // evaluateSprites just set up the secondary OAM for the next row.
-          // By detecting the hit now, step()'s dot loop will see spr0HitX/Y
-          // when processing the next scanline's dots, allowing the hit flag
-          // to be set at the correct PPU cycle.
-          if (
-            !this.hitSpr0 &&
-            this.f_bgVisibility === 1 &&
-            this.f_spVisibility === 1
-          ) {
-            this._precomputeSprite0Hit(bufferScan + 1);
-            if (this.spr0HitX !== -1) {
-              this.hitSpr0 = true;
-            }
-          }
-
-          if (this.f_bgVisibility === 1 || this.f_spVisibility === 1) {
-            // Clock mapper IRQ Counter:
-            this.nes.mmap.clockIrqCounter();
-          }
-        }
+      }
     }
 
     this.scanline++;
@@ -824,14 +775,16 @@ class PPU {
     // registers whenever either flag is set, so BG tile data exists in
     // pixrendered even if only sprites were previously enabled. Re-enabling
     // BG mid-scanline can trigger sprite 0 hit against this data.
+    let visStart = this.visibleStartScanline;
+    let visEnd = this.visibleEndScanline;
     if (
       !this.hitSpr0 &&
       this.f_bgVisibility === 1 &&
       this.f_spVisibility === 1 &&
-      this.scanline >= 21 &&
-      this.scanline <= 260
+      this.scanline >= visStart &&
+      this.scanline <= visEnd
     ) {
-      let bufferScan = this.scanline + 1 - 21;
+      let bufferScan = this.scanline + 1 - visStart;
       if (this.scanlineSprite0[bufferScan]) {
         if (this.checkSprite0(bufferScan)) {
           this.hitSpr0 = true;
@@ -913,7 +866,11 @@ class PPU {
     // During visible or pre-render scanlines with rendering enabled,
     // $2004 reads return internal PPU sprite data, not OAM directly.
     // See https://www.nesdev.org/wiki/PPU_registers#OAMDATA
-    if (renderingEnabled && this.scanline >= 20 && this.scanline <= 260) {
+    if (
+      renderingEnabled &&
+      this.scanline >= this.preRenderScanline &&
+      this.scanline <= this.visibleEndScanline
+    ) {
       let dot = this.curX;
       if (dot <= 64) {
         // Dots 0-64: secondary OAM clear phase (dots 1-64, plus idle dot 0).
@@ -956,7 +913,11 @@ class PPU {
     let renderingEnabled =
       this.f_spVisibility === 1 || this.f_bgVisibility === 1;
 
-    if (renderingEnabled && this.scanline >= 20 && this.scanline <= 260) {
+    if (
+      renderingEnabled &&
+      this.scanline >= this.preRenderScanline &&
+      this.scanline <= this.visibleEndScanline
+    ) {
       // During rendering on visible/pre-render scanlines, writes to $2004
       // are suppressed (value is NOT stored to OAM). Instead, OAMADDR is
       // incremented by 4 and ANDed with $FC, matching the hardware's
@@ -1012,7 +973,7 @@ class PPU {
       this.cntVT = this.regVT;
       this.cntHT = this.regHT;
 
-      this.checkSprite0(this.scanline + 1 - 21);
+      this.checkSprite0(this.scanline + 1 - this.visibleStartScanline);
     }
 
     this.firstWrite = !this.firstWrite;
@@ -1160,7 +1121,9 @@ class PPU {
     let renderingEnabled =
       this.f_spVisibility === 1 || this.f_bgVisibility === 1;
     // jsnes scanlines 20-260 = NES pre-render + visible scanlines
-    let onRenderingScanline = this.scanline >= 20 && this.scanline <= 260;
+    let onRenderingScanline =
+      this.scanline >= this.preRenderScanline &&
+      this.scanline <= this.visibleEndScanline;
 
     if (renderingEnabled && onRenderingScanline) {
       // Coarse X increment (with horizontal nametable toggle on overflow)
@@ -1293,19 +1256,17 @@ class PPU {
     // When the PPU is already rendering and a latch-triggered loadVromBank calls
     // triggerRendering, we must not re-enter the rendering loop.
     if (this._inRendering) return;
-    if (this.scanline >= 21 && this.scanline <= 260) {
+    let visStart = this.visibleStartScanline;
+    let visEnd = this.visibleEndScanline;
+    if (this.scanline >= visStart && this.scanline <= visEnd) {
       // Render sprites, and combine:
       this.renderFramePartially(
         this.lastRenderedScanline + 1,
-        this.scanline - 21 - this.lastRenderedScanline,
+        this.scanline - visStart - this.lastRenderedScanline,
       );
 
       // Set last rendered scanline:
-      this.lastRenderedScanline = this.scanline - 21;
-      this.validTileData = false;
-      if (this.scantile) {
-        this.scantile.fill(undefined);
-      }
+      this.lastRenderedScanline = this.scanline - visStart;
     }
   }
 
@@ -1403,9 +1364,12 @@ class PPU {
           );
 
           // Fetch tile & attrib data:
-          if (this.validTileData && typeof scantile[tile] !== "undefined") {
+          if (this.validTileData) {
             // Get data from array:
             t = scantile[tile];
+            if (typeof t === "undefined") {
+              continue;
+            }
             tpix = t.pix;
             att = attrib[tile];
           } else {
@@ -2005,11 +1969,6 @@ class PPU {
         value,
       );
     }
-
-    this.validTileData = false;
-    if (this.scantile) {
-      this.scantile.fill(undefined);
-    }
   }
 
   // Updates the internal name table buffers
@@ -2017,13 +1976,8 @@ class PPU {
   nameTableWrite(index, address, value) {
     this.nameTable[index].tile[address] = value;
 
-    this.validTileData = false;
-    if (this.scantile) {
-      this.scantile.fill(undefined);
-    }
-
     // Update Sprite #0 hit:
-    let bufferScan = this.scanline + 1 - 21;
+    let bufferScan = this.scanline + 1 - this.visibleStartScanline;
     this.checkSprite0(bufferScan);
   }
 
@@ -2046,7 +2000,7 @@ class PPU {
     let tIndex = address >> 2;
 
     if (tIndex === 0) {
-      let bufferScan = this.scanline + 1 - 21;
+      let bufferScan = this.scanline + 1 - this.visibleStartScanline;
       this.checkSprite0(bufferScan);
     }
 

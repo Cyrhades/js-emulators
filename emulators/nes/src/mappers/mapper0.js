@@ -439,12 +439,10 @@ class Mapper0 {
   }
 
   loadBatteryRam() {
-    if (this.nes.rom.batteryRam) {
-      if (!this.nes.rom.batteryRamData) {
-        this.nes.rom.batteryRamData = new Uint8Array(0x2000);
-      }
+    const data = this.nes.rom.batteryRamData || (this.nes.rom.batteryRam instanceof Uint8Array ? this.nes.rom.batteryRam : null);
+    if (data) {
       copyArrayElements(
-        this.nes.rom.batteryRamData,
+        data,
         0,
         this.nes.cpu.mem,
         0x6000,

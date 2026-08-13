@@ -86,24 +86,24 @@ export class NesEmulatorAdapter implements Emulator {
 
     this.saveData = {
       hasSaveData: () => {
-        return !!(this.nes && this.nes.rom && (this.nes.rom.batteryRam || this.nes.rom.batteryRamData));
+        return !!(this.nes && (this.nes as any).hasBatteryRam());
       },
       getSaveData: () => {
-        return this.nes ? this.nes.getSaveData() : null;
+        return this.nes ? (this.nes as any).getBatteryRam() : null;
       },
       loadSaveData: (data: Uint8Array) => {
         if (this.nes) {
-          this.nes.loadSaveData(data);
+          (this.nes as any).setBatteryRam(data);
           this.isSaveRamDirty = true;
           this.flushSaveRamToStorage();
         }
       },
       exportSaveFile: () => {
-        return this.nes ? this.nes.getSaveData() : null;
+        return this.nes ? (this.nes as any).getBatteryRam() : null;
       },
       importSaveFile: (data: Uint8Array) => {
         if (this.nes) {
-          this.nes.loadSaveData(data);
+          (this.nes as any).setBatteryRam(data);
           this.isSaveRamDirty = true;
           this.flushSaveRamToStorage();
         }
@@ -114,15 +114,23 @@ export class NesEmulatorAdapter implements Emulator {
   }
 
   private lastFrameTime: number = 0;
-  private readonly frameInterval: number = 1000 / 60.0;
+  private frameInterval: number = 1000 / 60.0;
+
+  private updateRegionFramerate(): void {
+    const isPal = !!(this.nes && this.nes.rom && (this.nes.rom as any).isPal());
+    const targetFps = isPal ? 50.007 : 60.098;
+    this.frameInterval = 1000 / targetFps;
+    const sr = audioManager.getSampleRate();
+    this.nes.setSampleRate(sr);
+    this.nes.setFramerate(targetFps);
+  }
 
   public async loadRom(data: Uint8Array): Promise<void> {
     this.flushSaveRamToStorage();
     this.stop();
     await audioManager.resume();
-    const sr = audioManager.getSampleRate();
-    this.nes.setSampleRate(sr);
     this.nes.loadROM(data);
+    this.updateRegionFramerate();
     this.prevButtons = {};
     this.audioSamples = [];
     this.lastFrameTime = 0;
@@ -333,7 +341,7 @@ export class NesEmulatorAdapter implements Emulator {
   public saveRamToStorage(): void {
     const key = this.getSaveRamKey();
     if (!key) return;
-    const saveData = this.nes.getSaveData();
+    const saveData = (this.nes as any).getBatteryRam();
     if (!saveData) return;
 
     try {
@@ -341,7 +349,7 @@ export class NesEmulatorAdapter implements Emulator {
       if (storage) {
         const base64 = typeof Buffer !== "undefined"
           ? Buffer.from(saveData).toString("base64")
-          : btoa(Array.from(saveData).map((b: number) => String.fromCharCode(b)).join(""));
+          : btoa(Array.from(saveData as Uint8Array).map((b: number) => String.fromCharCode(b)).join(""));
         storage.setItem(key, base64);
       }
     } catch (e) {
@@ -367,7 +375,7 @@ export class NesEmulatorAdapter implements Emulator {
               data[i] = binary.charCodeAt(i);
             }
           }
-          this.nes.loadSaveData(data);
+          (this.nes as any).setBatteryRam(data);
         }
       }
     } catch (e) {
@@ -413,6 +421,7 @@ export class NesEmulatorAdapter implements Emulator {
   public reset(): void {
     this.flushSaveRamToStorage();
     this.nes.reloadROM();
+    this.updateRegionFramerate();
     this.audioSamples = [];
     this.lastFrameTime = 0;
     this.reapplyPatches();

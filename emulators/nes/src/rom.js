@@ -1,6 +1,5 @@
 import Mappers from "./mappers/index.js";
 import Tile from "./tile.js";
-import { copyArrayElements } from "./utils.js";
 
 class ROM {
   // Mirroring types (instance properties so they're accessible via
@@ -17,10 +16,11 @@ class ROM {
   constructor(nes) {
     this.nes = nes;
     this.valid = false;
-    this.batteryRamData = null;
+    this.hasBatteryRam = false;
+    this.batteryRam = null;
   }
 
-  load(data) {
+  load(data, batteryRamData = null) {
     let i, j, v;
 
     // Accept Uint8Array, ArrayBuffer, Buffer, or binary string.
@@ -53,12 +53,9 @@ class ROM {
     // Flags from byte 6 (shared between iNES 1.0 and NES 2.0)
     this.mirroring = (this.header[6] & 1) !== 0 ? 1 : 0;
     this.batteryRam = (this.header[6] & 2) !== 0;
+    this.hasBatteryRam = this.batteryRam;
     this.trainer = (this.header[6] & 4) !== 0;
     this.fourScreen = (this.header[6] & 8) !== 0;
-
-    if (this.batteryRam && !this.batteryRamData) {
-      this.batteryRamData = new Uint8Array(0x2000);
-    }
 
     // Detect NES 2.0: byte 7 bits 3..2 == 0b10
     // https://www.nesdev.org/wiki/NES_2.0
@@ -70,9 +67,18 @@ class ROM {
       this._loadINES1Header();
     }
 
-    /* TODO
-        if (this.batteryRam)
-            this.loadBatteryRam();*/
+    if (this.prgNvRamSize > 0) {
+      this.batteryRam = true;
+      this.hasBatteryRam = true;
+    }
+
+    // Initialize SRAM array (default size 8192 bytes = 8 KB)
+    const ramSize = this.prgNvRamSize || 0x2000;
+    this.batteryRamData = new Uint8Array(ramSize);
+
+    if (batteryRamData) {
+      this.setSaveData(batteryRamData);
+    }
 
     // Load PRG-ROM banks:
     this.rom = new Array(this.romCount);
@@ -147,11 +153,11 @@ class ROM {
     this.vromCount = this.header[5] * 2; // Get the number of 4kB banks, not 8kB
     this.mapperType = (this.header[6] >> 4) | (this.header[7] & 0xf0);
 
-    // Check whether bytes 8-15 are zero. Non-zero values in this region
+    // Check whether bytes 12-15 are zero. Non-zero values in this region
     // typically indicate garbage (e.g. "DiskDude!" in old ROM dumps), so
     // we discard the upper mapper nibble from byte 7 to be safe.
     let foundError = false;
-    for (let i = 8; i < 16; i++) {
+    for (let i = 12; i < 16; i++) {
       if (this.header[i] !== 0) {
         foundError = true;
         break;
@@ -161,12 +167,18 @@ class ROM {
       this.mapperType &= 0xf; // Ignore byte 7
     }
 
+    // In clean iNES 1.0: Byte 9 bit 0: 0=NTSC, 1=PAL; Byte 10 bits 1..0: 0=NTSC, 2=PAL.
+    if ((this.header[9] & 1) !== 0 || (this.header[10] & 3) === 2) {
+      this.timingMode = 1;
+    } else {
+      this.timingMode = 0;
+    }
+
     this.subMapper = 0;
     this.prgRamSize = 0;
     this.prgNvRamSize = 0;
     this.chrRamSize = 0;
     this.chrNvRamSize = 0;
-    this.timingMode = 0;
     this.consoleType = 0;
   }
 
@@ -240,6 +252,36 @@ class ROM {
     return 64 << value;
   }
 
+  setBatteryRamData(data) {
+    if (!data) return;
+    let bytes = null;
+    if (data instanceof Uint8Array) {
+      bytes = data;
+    } else if (ArrayBuffer.isView(data)) {
+      bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    } else if (data instanceof ArrayBuffer) {
+      bytes = new Uint8Array(data);
+    } else if (Array.isArray(data)) {
+      bytes = new Uint8Array(data);
+    } else if (typeof data === "string") {
+      bytes = new Uint8Array(data.length);
+      for (let i = 0; i < data.length; i++) {
+        bytes[i] = data.charCodeAt(i) & 0xff;
+      }
+    }
+
+    if (bytes) {
+      if (!this.batteryRamData || this.batteryRamData.length !== bytes.length) {
+        this.batteryRamData = new Uint8Array(bytes.length);
+      }
+      for (let i = 0; i < bytes.length; i++) {
+        this.batteryRamData[i] = bytes[i];
+      }
+      this.hasBatteryRam = true;
+      this.batteryRam = true;
+    }
+  }
+
   getMirroringType() {
     if (this.fourScreen) {
       return this.FOURSCREEN_MIRRORING;
@@ -251,7 +293,7 @@ class ROM {
   }
 
   isPal() {
-    return this.timingMode === 1;
+    return this.timingMode === 1 || this.timingMode === 3;
   }
 
   mapperSupported() {
@@ -284,8 +326,11 @@ class ROM {
     const source = data instanceof Uint8Array ? data : new Uint8Array(data);
     ram.set(source.subarray(0, Math.min(source.length, 0x2000)));
     this.batteryRamData = ram;
-    this.batteryRam = true;
-    if (this.nes && this.nes.cpu && this.nes.cpu.mem) {
+    this.batteryRam = ram;
+    this.hasBatteryRam = true;
+    if (this.nes && this.nes.mmap) {
+      this.nes.mmap.loadBatteryRam();
+    } else if (this.nes && this.nes.cpu && this.nes.cpu.mem) {
       copyArrayElements(ram, 0, this.nes.cpu.mem, 0x6000, 0x2000);
     }
   }
