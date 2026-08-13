@@ -1302,6 +1302,10 @@ class PPU {
 
       // Set last rendered scanline:
       this.lastRenderedScanline = this.scanline - 21;
+      this.validTileData = false;
+      if (this.scantile) {
+        this.scantile.fill(undefined);
+      }
     }
   }
 
@@ -1399,12 +1403,9 @@ class PPU {
           );
 
           // Fetch tile & attrib data:
-          if (this.validTileData) {
+          if (this.validTileData && typeof scantile[tile] !== "undefined") {
             // Get data from array:
             t = scantile[tile];
-            if (typeof t === "undefined") {
-              continue;
-            }
             tpix = t.pix;
             att = attrib[tile];
           } else {
@@ -2004,12 +2005,22 @@ class PPU {
         value,
       );
     }
+
+    this.validTileData = false;
+    if (this.scantile) {
+      this.scantile.fill(undefined);
+    }
   }
 
   // Updates the internal name table buffers
   // with this new byte.
   nameTableWrite(index, address, value) {
     this.nameTable[index].tile[address] = value;
+
+    this.validTileData = false;
+    if (this.scantile) {
+      this.scantile.fill(undefined);
+    }
 
     // Update Sprite #0 hit:
     let bufferScan = this.scanline + 1 - 21;

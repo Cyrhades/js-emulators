@@ -1,0 +1,94 @@
+Nintendo MMC2 technical information
+-Utilized by Mike Tyson's Punchout! starring Mike Tyson and Punchout!
+-starring Mr. Dream.  As far as I know, these are the only cartridges
+-released using MMC2.
+
+-**Note**
+-Information contained within was provided by FanWen Yang (yangfanw@ms4.hinet.net)
+-and Paul Robson (autismuk@aol.com) of GB97 and TNes fame.
+-Please thank these people for providing this information.
+  
+-MMC2 Prg-ROM pages are 8K, and Chr-ROM pages are 4K.
+-Upon reset, the last 3 Prg-ROM pages of the cartridge are loaded and
+-hardwired into the NES cpu space of $A000-$FFFF. 
+
+ЪДДДДДДДДДВДДДДДДДВДДДДДДДДДДВДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДї
+і Address і Statusі Bits     і Description                                 і
+ГДДДДДДДДДЕДДДДДДДЕДДДДДДДДДДЕДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДґ
+і $A000   і  W    і pppppppp і Prg-ROM 8K Page Select Register             і
+і  ...    і       і          і                                             і
+і $AFFF   і       і          і    p = 8K Prg-ROM Select                    і
+і         і       і          і         Selects 8K Prg-ROM page at $8000.   і
+і         і       і          і                                             і
+і $B000   і  W    і cccccccc і Chr-ROM 4K Page Select Register             і
+і  ...    і       і          і                                             і
+і $CFFF   і       і          і    c = 4K Chr-ROM Select                    і
+і         і       і          і         Selects 4K Chr-ROM page             і
+і         і       і          і         to be used at VROM address $0000    і
+і         і       і          і                                             і
+і $D000   і  W    і cccccccc і Chr-ROM 4K Latch Register #1                і
+і  ...    і       і          і                                             і
+і $DFFF   і       і          і    c = 4K Chr-ROM Select                    і
+і         і       і          і         Selects 4K Chr-ROM latch value      і
+і         і       і          і         to be stored in latch register #1   і
+і         і       і          і                                             і
+і $E000   і  W    і cccccccc і Chr-ROM 4K Latch Register #2                і
+і  ...    і       і          і                                             і
+і $EFFF   і       і          і    c = 4K Chr-ROM Select                    і
+і         і       і          і         Selects 4K Chr-ROM latch value      і
+і         і       і          і         to be stored in latch register #2   і
+і         і       і          і                                             і
+і $F000   і  W    і ???????m і Mirroring Control Register                  і
+і  ...    і       і          і                                             і
+і $FFFF   і       і          і    m = Vram mirror select                   і
+і         і       і          і         0 = Vertical mirroring              і
+і         і       і          і         1 = Horizontal mirroring            і
+АДДДДДДДДДБДДДДДДДБДДДДДДДДДДБДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДДЩ
+
+
+-**Note**
+-Any write to $B000-$CFFF will be cause that 4K Chr-ROM page to be 
+-immediately bankswitched into VROM Address $0000-$0FFF.
+
+-MMC2 also contains a latch selector which shall be explained presently.
+-The selector contains the byte $FD or $FE, with $FE contained on reset.
+
+-MMC2 has two methods of bankswitching VROM space $1000-$1FFF.
+1). Write to D000-EFFF.  
+	
+	-If the latch selector contains the byte $FD, the page contained in
+	latch register #1 will be switched into VROM space $1000-$1FFF.
+	-If the latch selector contains the byte $FE, the page contained in
+	latch register #2 will be switched into VROM space $1000-$1FFF.
+
+    Therefore, if the program execution writes to $E000-$EFFF and the 
+    latch selector contains $FD, the write to $E000-$EFFF will be stored
+    in latch register #2 and the NES will bankswitch in the page stored in
+    latch register #1.
+
+2). Read from certain areas of the PPU.
+	
+	As you know, the ppu reads from its address space $0000-$1FFF,
+	the pattern tables, in order to refresh the display.  However, with
+	MMC2, reading from certain areas of the pattern tables will cause 
+	the NES to bankswitch.
+	
+	 Read from $0FD0-$0FDF or $1FD0-$1FDF:
+	  -Bankswitch in the page contained in latch register #1.
+	  -Store $FD in the latch selector.
+	 Read from $0FE0-$0FEF or $1FE0-$1FEF:
+	  -Bankswitch in the page contained in latch register #2.
+	  -Store $FE in the latch selector.
+
+	Notice, these are the areas used by the PPU to draw a name table tile
+	value of $FD or $FE, respectively.  I do not know if this holds true 
+	for drawing sprites, further testing is required.
+
+Please direct any questions on this mapper to
+Jim Geffre (jgeffre@nd.edu)
+-01/29/98
+
+
+	
+
+		

@@ -40,31 +40,5 @@ export const futureConsoles: ConsoleDefinition[] = [
     supportedRegions: ["GENESIS", "MEGA DRIVE (PAL)", "MEGA DRIVE (JPN)", "WORLD"],
     controls: { name: "Mega Drive Controller", bindings: [] },
     createEmulator: () => { throw new Error("Mega Drive emulator not implemented yet."); }
-  },
-  {
-    id: "sms",
-    name: "Sega Master System",
-    manufacturer: "Sega",
-    releaseYear: 1985,
-    description: "Console 8-bit dynamique de Sega.",
-    isAvailable: false,
-    maxPlayers: 2,
-    supportedRomExtensions: [".sms"],
-    supportedRegions: ["NTSC", "PAL", "NTSC-J", "WORLD"],
-    controls: { name: "Master System Pad", bindings: [] },
-    createEmulator: () => { throw new Error("Master System emulator not implemented yet."); }
-  },
-  {
-    id: "gg",
-    name: "Sega Game Gear",
-    manufacturer: "Sega",
-    releaseYear: 1990,
-    description: "Console portable 8-bit couleur avec rétroéclairage.",
-    isAvailable: false,
-    maxPlayers: 1,
-    supportedRomExtensions: [".gg"],
-    supportedRegions: ["NTSC", "PAL", "NTSC-J", "WORLD"],
-    controls: { name: "Game Gear", bindings: [] },
-    createEmulator: () => { throw new Error("Game Gear emulator not implemented yet."); }
   }
 ];

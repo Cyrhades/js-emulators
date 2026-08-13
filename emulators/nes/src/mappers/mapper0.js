@@ -483,6 +483,11 @@ class Mapper0 {
 
     let vromTile = this.nes.rom.vromTile[bank % this.nes.rom.vromCount];
     copyArrayElements(vromTile, 0, this.nes.ppu.ptTile, address >> 4, 256);
+
+    this.nes.ppu.validTileData = false;
+    if (this.nes.ppu.scantile) {
+      this.nes.ppu.scantile.fill(undefined);
+    }
   }
 
   load32kRomBank(bank, address) {
@@ -525,6 +530,11 @@ class Mapper0 {
     for (let i = 0; i < 64; i++) {
       this.nes.ppu.ptTile[baseIndex + i] = vromTile[((bank1k % 4) << 6) + i];
     }
+
+    this.nes.ppu.validTileData = false;
+    if (this.nes.ppu.scantile) {
+      this.nes.ppu.scantile.fill(undefined);
+    }
   }
 
   load2kVromBank(bank2k, address) {
@@ -548,6 +558,11 @@ class Mapper0 {
     let baseIndex = address >> 4;
     for (let i = 0; i < 128; i++) {
       this.nes.ppu.ptTile[baseIndex + i] = vromTile[((bank2k % 2) << 7) + i];
+    }
+
+    this.nes.ppu.validTileData = false;
+    if (this.nes.ppu.scantile) {
+      this.nes.ppu.scantile.fill(undefined);
     }
   }
 

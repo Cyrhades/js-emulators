@@ -26,6 +26,7 @@ class Mapper9 extends Mapper0 {
     // Both initialize to $FE on power-up.
     this.latch0 = 0xfe;
     this.latch1 = 0xfe;
+    this.inSpriteRender = false;
   }
 
   write(address, value) {
@@ -89,6 +90,16 @@ class Mapper9 extends Mapper0 {
     this.loadVromBank(bank, 0x1000);
   }
 
+  // Called by the PPU before sprite rendering pass.
+  onSpriteRender() {
+    this.inSpriteRender = true;
+  }
+
+  // Called by the PPU before BG rendering / after sprite rendering.
+  onBgRender() {
+    this.inSpriteRender = false;
+  }
+
   // Called by the PPU when pattern table memory is accessed.
   // Updates the CHR latches based on the tile being fetched.
   // The latch switches AFTER the data has been read, so the
@@ -99,26 +110,28 @@ class Mapper9 extends Mapper0 {
     // The same trigger tile may appear on many consecutive scanlines (e.g. a
     // column of $FD tiles in the nametable), and redundantly calling
     // loadVromBank on every fetch would copy 4 KB of VRAM each time.
-    if (address === 0x0fd8) {
-      // Latch 0 triggers on exactly $0FD8
-      if (this.latch0 !== 0xfd) {
+    if (address >= 0x0fd0 && address <= 0x0fdf) {
+      // Latch 0 triggers on $0FD0-$0FDF (tile $FD).
+      // Ignore Latch 0 changes during sprite rendering pass to prevent sprite tile
+      // fetches from corrupting background CHR bank state.
+      if (this.latch0 !== 0xfd && !this.inSpriteRender) {
         this.latch0 = 0xfd;
         this._updateChr0();
       }
-    } else if (address === 0x0fe8) {
-      // Latch 0 triggers on exactly $0FE8
-      if (this.latch0 !== 0xfe) {
+    } else if (address >= 0x0fe0 && address <= 0x0fef) {
+      // Latch 0 triggers on $0FE0-$0FEF (tile $FE).
+      if (this.latch0 !== 0xfe && !this.inSpriteRender) {
         this.latch0 = 0xfe;
         this._updateChr0();
       }
-    } else if (address >= 0x1fd8 && address <= 0x1fdf) {
-      // Latch 1 triggers on $1FD8-$1FDF
+    } else if (address >= 0x1fd0 && address <= 0x1fdf) {
+      // Latch 1 triggers on $1FD0-$1FDF (tile $FD)
       if (this.latch1 !== 0xfd) {
         this.latch1 = 0xfd;
         this._updateChr1();
       }
-    } else if (address >= 0x1fe8 && address <= 0x1fef) {
-      // Latch 1 triggers on $1FE8-$1FEF
+    } else if (address >= 0x1fe0 && address <= 0x1fef) {
+      // Latch 1 triggers on $1FE8-$1FEF (tile $FE)
       if (this.latch1 !== 0xfe) {
         this.latch1 = 0xfe;
         this._updateChr1();
@@ -135,13 +148,19 @@ class Mapper9 extends Mapper0 {
     this.load8kRomBank(0, 0x8000);
 
     // Load the last three 8 KB PRG banks fixed at $A000-$FFFF
-    let lastBank8k = (this.nes.rom.romCount - 1) * 2 + 1;
+    let total8kBanks = this.nes.rom.romCount * 2;
+    let lastBank8k = total8kBanks - 1;
     this.load8kRomBank(lastBank8k - 2, 0xa000);
     this.load8kRomBank(lastBank8k - 1, 0xc000);
     this.load8kRomBank(lastBank8k, 0xe000);
 
-    // Load CHR-ROM
-    this.loadCHRROM();
+    this.latch0 = 0xfe;
+    this.latch1 = 0xfe;
+    this.inSpriteRender = false;
+
+    // Load initial CHR banks based on initial latch states (0xFE)
+    this._updateChr0();
+    this._updateChr1();
 
     // Load Battery RAM (if present)
     this.loadBatteryRam();
