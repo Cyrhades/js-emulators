@@ -1,6 +1,6 @@
 # Émulateur Rétro Web (JS-Emulators)
 
-Plateforme d'émulation de consoles rétro développée en JavaScript et TypeScript, proposant une expérience dans le navigateur pour les consoles Nintendo NES et Atari 2600, je tenterais d'ajouter d'autres consoles plus tard.
+Plateforme d'émulation de consoles rétro développée en JavaScript et TypeScript, proposant une expérience dans le navigateur pour les consoles Nintendo NES, Sega Master System, Sega Game Gear et Atari 2600.
 
 ---
 
@@ -36,12 +36,20 @@ Par exemple, j'ai optimisé la gestion de la limite d'affichage des sprites de l
 L'émulation de certains jeux reste toutefois imparfaite. Des problèmes subsistent notamment avec certains mappers, dont la gestion doit encore être retravaillée et améliorée.
 
 
+### Sega Master System
+
+Prise en charge de la console 8-bit de Sega avec son processeur Z80 et son contrôleur graphique VDP. Émulation des jeux au format `.sms` avec rendu vidéo, gestion sonore et support des codes de triche (Game Genie, Pro Action Replay, RAW).
+
+
+### Sega Game Gear
+
+Prise en charge de la console portable 8-bit de Sega. Basée sur l'architecture Master System (Z80/VDP) avec un affichage adapté (160x144). Support des jeux au format `.gg` et gestion des codes de triche.
 
 ---
 
 ## Fonctionnalités principales
 
-- Émulation de la console Nintendo Entertainment System (NES) et Atari 2600.
+- Émulation des consoles Nintendo Entertainment System (NES), Sega Master System (SMS), Sega Game Gear (GG) et Atari 2600.
 - Intégration complète du module Game Genie pour la NES (décodage et application de codes de triche en temps réel).
 - Synchronisation vidéo fluide calée sur 60 FPS réels.
 - Traitement sonore dynamique (AudioWorklet) avec filtres matériels.
